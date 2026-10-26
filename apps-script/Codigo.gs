@@ -58,6 +58,10 @@ function configurar() {
   if (!prop_('SALA')) salaEvento_('jason', 'espera', 'Sala instalada. Esperando material.', { mision: null });
 
   Logger.log('Webhook de Telegram: ' + (w && w.ok ? 'activo ✅' : 'ERROR ' + JSON.stringify(w)));
+  Logger.log('Mandy (' + (prop_('GEMINI_API_KEY') ? 'Gemini' : 'Groq') + '): ' + probarIA_());
+  const gh = UrlFetchApp.fetch('https://api.github.com/repos/' + prop_('GITHUB_REPO'), {
+    muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + prop_('GITHUB_TOKEN'), Accept: 'application/vnd.github+json' } });
+  Logger.log('GitHub: ' + (gh.getResponseCode() === 200 ? 'acceso al repositorio ✅' : 'ERROR ' + gh.getResponseCode() + ' (revisa GITHUB_TOKEN y GITHUB_REPO)'));
   Logger.log('Carpeta de Drive: https://drive.google.com/drive/folders/' + c.base);
   Logger.log('────────── Copia estos dos valores en GitHub → Settings → Secrets → Actions ──────────');
   Logger.log('SALA_CLAVE = ' + prop_('CLAVE_SALA'));
@@ -604,6 +608,16 @@ function groq_(sistema, usuario) {
     throw new Error('Groq respondió ' + c + ': ' + r.getContentText().slice(0, 200));
   }
   throw new Error('Mandy no logró una respuesta válida. Intenta de nuevo.');
+}
+
+/** Prueba rápida de la IA para configurar(): no muestra la clave. */
+function probarIA_() {
+  try {
+    const r = ia_('Responde solo este JSON: {"ok": true}');
+    return r && r.ok ? 'responde ✅' : 'respondió algo inesperado';
+  } catch (e) {
+    return 'ERROR — ' + String(e.message || e).slice(0, 200);
+  }
 }
 
 /** Valida los cortes y los ajusta al inicio/fin de frase más cercano para no cortar palabras. */
