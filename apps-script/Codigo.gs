@@ -562,30 +562,42 @@ function ia_(usuario) {
   return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario) : groq_(sistema, usuario);
 }
 
+/** Modelos gratuitos de Gemini, en orden de preferencia: si uno está saturado, se prueba el siguiente. */
+function modelosGemini_() {
+  const preferido = prop_('MODELO_GEMINI', 'gemini-3.8-flash');
+  return [preferido, 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
+    .filter((m, i, lista) => lista.indexOf(m) === i);
+}
+
 function gemini_(sistema, usuario) {
-  const modelo = prop_('MODELO_GEMINI', 'gemini-3.8-flash');
-  for (let i = 0; i < 3; i++) {
-    const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent', {
-      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-      headers: { 'x-goog-api-key': prop_('GEMINI_API_KEY') },
-      payload: JSON.stringify({
-        systemInstruction: { parts: [{ text: sistema }] },
-        contents: [{ role: 'user', parts: [{ text: usuario }] }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
-      }),
-    });
-    const c = r.getResponseCode();
-    if (c === 200) {
-      try {
-        const d = JSON.parse(r.getContentText());
-        return JSON.parse(d.candidates[0].content.parts.map(p => p.text || '').join(''));
-      } catch (e) { continue; }
+  let ultimo = '';
+  const modelos = modelosGemini_();
+  for (let k = 0; k < modelos.length; k++) {
+    for (let i = 0; i < 2; i++) {
+      const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelos[k] + ':generateContent', {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { 'x-goog-api-key': prop_('GEMINI_API_KEY') },
+        payload: JSON.stringify({
+          systemInstruction: { parts: [{ text: sistema }] },
+          contents: [{ role: 'user', parts: [{ text: usuario }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
+        }),
+      });
+      const c = r.getResponseCode();
+      if (c === 200) {
+        try {
+          const d = JSON.parse(r.getContentText());
+          return JSON.parse(d.candidates[0].content.parts.map(p => p.text || '').join(''));
+        } catch (e) { ultimo = 'respuesta no válida'; continue; }
+      }
+      if (c === 400 || c === 401 || c === 403) throw new Error('Gemini rechazó la petición (' + c + '). Revisa GEMINI_API_KEY.');
+      ultimo = c + ' en ' + modelos[k];
+      if (c === 404) break;                      // ese modelo no está disponible: pasar al siguiente
+      if (c === 429 || c >= 500) { if (i === 0) Utilities.sleep(5000); continue; }
+      throw new Error('Gemini respondió ' + c + ': ' + r.getContentText().slice(0, 200));
     }
-    if ((c === 429 || c === 503) && i < 2) { Utilities.sleep(15000); continue; }
-    if (c === 400 || c === 403) throw new Error('Gemini rechazó la petición (' + c + '). Revisa GEMINI_API_KEY o MODELO_GEMINI.');
-    throw new Error('Gemini respondió ' + c + ': ' + r.getContentText().slice(0, 200));
   }
-  throw new Error('Mandy no logró una respuesta válida. Intenta de nuevo.');
+  throw new Error('Gemini está saturado en este momento (' + ultimo + '). Intenta de nuevo en unos minutos.');
 }
 
 function groq_(sistema, usuario) {

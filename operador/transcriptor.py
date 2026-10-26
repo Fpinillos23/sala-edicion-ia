@@ -114,10 +114,10 @@ def _a_segundos(t):
 
 
 def _pedir_gemini(clave, modelo, audio_bytes):
+    """Prueba el modelo preferido y, si está saturado, otros modelos gratuitos de Gemini."""
     import base64
     import time
     import requests
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
     cuerpo = {
         "contents": [{"role": "user", "parts": [
             {"inline_data": {"mime_type": "audio/mp3", "data": base64.b64encode(audio_bytes).decode()}},
@@ -125,18 +125,28 @@ def _pedir_gemini(clave, modelo, audio_bytes):
         ]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.0},
     }
-    for intento in range(4):
-        r = requests.post(url, headers={"x-goog-api-key": clave}, json=cuerpo, timeout=300)
-        if r.status_code == 200:
-            texto = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            datos = json.loads(texto)
-            return datos if isinstance(datos, list) else datos.get("segmentos", [])
-        if r.status_code in (429, 500, 503) and intento < 3:
-            print("   Gemini pidió una pausa; espero 30 segundos...")
-            time.sleep(30)
-            continue
-        raise RuntimeError(f"Gemini respondió {r.status_code} al transcribir.")
-    return []
+    modelos = list(dict.fromkeys([modelo, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]))
+    ultimo = ""
+    for m in modelos:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+        for intento in range(3):
+            r = requests.post(url, headers={"x-goog-api-key": clave}, json=cuerpo, timeout=300)
+            if r.status_code == 200:
+                texto = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                datos = json.loads(texto)
+                return datos if isinstance(datos, list) else datos.get("segmentos", [])
+            if r.status_code in (400, 401, 403):
+                raise RuntimeError(f"Gemini rechazó la petición ({r.status_code}). Revisa GEMINI_API_KEY.")
+            ultimo = f"{r.status_code} en {m}"
+            if r.status_code == 404:
+                break
+            if r.status_code == 429 or r.status_code >= 500:
+                print(f"   {m} está ocupado; reintento en 20 segundos...")
+                time.sleep(20)
+                continue
+            raise RuntimeError(f"Gemini respondió {r.status_code} al transcribir.")
+        print(f"   Paso a otro modelo de Gemini ({ultimo}).")
+    raise RuntimeError(f"Gemini está saturado en este momento ({ultimo}). Reintenta en unos minutos.")
 
 
 def transcribir_gemini(clave, video, carpeta_trabajo, modelo="gemini-3.8-flash"):
