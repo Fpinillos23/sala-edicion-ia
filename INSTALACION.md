@@ -94,7 +94,12 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 
 - **Videos de hasta 20 MB**: envíalos directo al bot.
 - **Videos más pesados**: súbelos a la carpeta **Sala de Edición IA › entrada** de tu Drive y escribe `/drive`, o pega el enlace de Drive en el chat.
-- Responde las preguntas de Mandy. Si no sabes algo, `/saltar`: quedará como *vacío de información*, nunca se inventa.
+- **Jason siempre pregunta primero qué hacer** con el material. Puedes escribirlo en el mismo mensaje del video (pie de foto) o elegir un botón:
+  - 🎬 **Reel con lo que se dice**: entrevistas, declaraciones, ruedas de prensa.
+  - 🖼 **Quitar el audio y animar imágenes encima**: envía las fotos antes o después del video (también como álbum). Sonny quita todo el sonido y pone las imágenes, en el orden en que llegaron, en un recuadro flotante con borde blanco, repartidas a lo largo del video. Si en la instrucción pides un titular, sale arriba y el recuadro baja.
+  - 🔇 **Solo quitar el audio**.
+  - Si la instrucción no es clara, Jason pregunta en vez de adivinar. Si Lisa no encuentra voz en un video, te ofrece el modo visual.
+- En el modo reel, responde las preguntas de Mandy. Si no sabes algo, `/saltar`: quedará como *vacío de información*, nunca se inventa.
 - Elige duración y formato, revisa el guion y pulsa **Aprobar y editar** o **Pedir cambios**.
 - Sonny te envía el reel al chat. El guion queda en **Sala de Edición IA › salida**.
 - **Copia maestra en Drive** (el reel original, sin recomprimir): pídela con el botón **💾 Aprobar + copia maestra en Drive**. En reels de más de 1 minuto se guarda sola. Jason te envía el enlace al terminar. Sonny solo recibe un permiso de subida de un solo uso para ese archivo, nunca acceso a tu Drive.
@@ -120,4 +125,5 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 - **Límites gratuitos**: Telegram deja a los bots descargar archivos de hasta 20 MB y enviar videos de hasta 50 MB (si el reel pesa más, Sonny lo recomprime). Gemini gratuito tiene topes por minuto y por día (los ves en Google AI Studio); si aparece una pausa, la sala espera sola. Las Actions son gratuitas en repositorios públicos.
 - **Privacidad de Gemini gratuito**: en el plan gratuito, Google puede usar lo que envías para mejorar sus productos, y personas pueden revisarlo. No pases por la sala material confidencial de fuentes que no deba salir de la redacción.
 - **Revisa nombres y cifras en los subtítulos**: Whisper puede escuchar mal algunas palabras.
-- Mandy trabaja con lo que **se dice** en el video; no ve la imagen. Si quieres un momento solo visual, pídelo en *Pedir cambios* indicando el minuto.
+- Mandy trabaja con lo que **se dice** en el video; no ve la imagen. Para material sin voz (solo música o imágenes), usa el modo visual.
+- Las imágenes se guardan en **Sala de Edición IA › imagenes** y, como el video, solo se comparten por enlace mientras Sonny trabaja.

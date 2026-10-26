@@ -166,3 +166,112 @@ def renderizar(video, cortes, segmentos, titulo, formato, carpeta_trabajo, desti
     Path(destino).parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(trabajo / "final.mp4"), str(destino))
     return total
+
+
+# ---------- Modo visual: video sin voz + imágenes animadas en un recuadro flotante ----------
+
+def _reparto(total, n, maximo=7.0):
+    """Reparte n imágenes a lo largo de 'total' segundos, cada una centrada en su tramo."""
+    if n <= 0 or total <= 0:
+        return []
+    tramo = total / n
+    dura = max(1.5, min(tramo * 0.8, maximo, tramo))
+    return [(i * tramo + (tramo - dura) / 2, dura) for i in range(n)]
+
+
+def renderizar_visual(video, imagenes, formato, carpeta_trabajo, destino, conf, audio="silencio", titulo="", avisar=print):
+    """Quita el audio del video y pone encima las imágenes, una a la vez, en un recuadro que flota.
+    Cada imagen entra con un fundido, se acerca despacio (efecto Ken Burns) y sale con otro fundido."""
+    video, destino = Path(video).resolve(), Path(destino).resolve()
+    trabajo = Path(carpeta_trabajo).resolve() / "render_visual"
+    if trabajo.exists():
+        shutil.rmtree(trabajo)
+    trabajo.mkdir(parents=True)
+    info = info_video(video)
+    total = info["duracion"]
+    if total <= 0:
+        raise RuntimeError("No pude leer la duración del video.")
+    filtro, (W, H) = _filtro(formato, info)
+    vertical = H > W
+
+    # Tamaño máximo del recuadro y posición: arriba al centro en vertical, a la derecha en horizontal.
+    bw, bh = (round(W * 0.70), round(H * 0.32)) if vertical else (round(W * 0.42), round(H * 0.62))
+    bw, bh = bw - bw % 2, bh - bh % 2
+    borde = max(4, round(min(W, H) * 0.008))
+    if vertical and titulo:  # con titular arriba, el recuadro flota en la parte de abajo
+        pos_x, pos_y = "(W-w)/2", f"H-h-{round(H * 0.09)}+{round(H * 0.008)}*sin(2*PI*t/3.5)"
+    elif vertical:
+        pos_x, pos_y = "(W-w)/2", f"{round(H * 0.11)}+{round(H * 0.008)}*sin(2*PI*t/3.5)"
+    else:
+        pos_x, pos_y = f"W-w-{round(W * 0.05)}", f"(H-h)/2+{round(H * 0.012)}*sin(2*PI*t/3.5)"
+
+    entradas = ["-i", str(video)]
+    partes = [f"[0:v]{filtro}[base]"]
+    reparto = _reparto(total, len(imagenes))
+    ultimo = "base"
+    for k, (img, (ini, dura)) in enumerate(zip(imagenes, reparto), 1):
+        entradas += ["-i", str(Path(img).resolve())]
+        cuadros = max(1, round(dura * 30))
+        f = 0.45
+        partes.append(
+            f"[{k}:v]scale={bw - 2 * borde}:{bh - 2 * borde}:force_original_aspect_ratio=decrease,"
+            f"scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,"
+            f"zoompan=z='min(1+0.10*on/{cuadros},1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={cuadros}:s=WIDTHxHEIGHT:fps=30,"
+            f"pad=iw+{2 * borde}:ih+{2 * borde}:{borde}:{borde}:white,format=rgba,"
+            f"fade=t=in:st=0:d={f}:alpha=1,fade=t=out:st={max(0.0, dura - f):.2f}:d={f}:alpha=1,"
+            f"setpts=PTS-STARTPTS+{ini:.2f}/TB[img{k}]"
+        )
+        # zoompan necesita el tamaño final explícito: se calcula después de leer la imagen
+        partes[-1] = partes[-1].replace("WIDTHxHEIGHT", _tam_imagen(img, bw - 2 * borde, bh - 2 * borde))
+        partes.append(f"[{ultimo}][img{k}]overlay=x='{pos_x}':y='{pos_y}':eof_action=pass:"
+                      f"enable='between(t,{ini:.2f},{ini + dura:.2f})'[v{k}]")
+        ultimo = f"v{k}"
+
+    logo = Path(conf["logo"]).resolve() if conf.get("logo") else None
+    if logo and logo.exists():
+        entradas += ["-i", str(logo)]
+        n = len(imagenes) + 1
+        ancho_logo = round(min(W, H) * 0.17)
+        partes.append(f"[{n}:v]scale={ancho_logo}:-1[logo]")
+        partes.append(f"[{ultimo}][logo]overlay=W-w-{round(ancho_logo * 0.25)}:{round(ancho_logo * 0.25)}[vl]")
+        ultimo = "vl"
+
+    if titulo:
+        escribir_ass(trabajo / "titulo.ass", [], titulo, total, (W, H), conf["fuente"],
+                     _color_ass(conf["color"]), conf.get("segundos_titulo") or 0)
+        partes.append(f"[{ultimo}]ass=titulo.ass[vt]")
+        ultimo = "vt"
+
+    # Audio: "silencio" = pista muda (Silencio total). "original" conserva el sonido del video.
+    if audio == "original" and info["tiene_audio"]:
+        mapa_audio = ["-map", "0:a:0"]
+    else:
+        entradas += ["-f", "lavfi", "-t", f"{total:.2f}", "-i", "anullsrc=r=48000:cl=stereo"]
+        mapa_audio = ["-map", f"{_indice_ultima(entradas)}:a"]
+
+    (trabajo / "filtro.txt").write_text(";".join(partes), encoding="utf-8")
+    avisar(f"Animando {len(imagenes)} imágenes sobre el video" if imagenes else "Quitando el audio del video")
+    _ffmpeg(entradas + ["-filter_complex_script", "filtro.txt", "-map", f"[{ultimo}]"] + mapa_audio +
+            ["-t", f"{total:.2f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "final.mp4"],
+            cwd=str(trabajo))
+    Path(destino).parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(trabajo / "final.mp4"), str(destino))
+    return total
+
+
+def _indice_ultima(entradas):
+    return entradas.count("-i") - 1
+
+
+def _tam_imagen(img, maxw, maxh):
+    """Tamaño (par) que tendrá la imagen al encajarla en el recuadro sin deformarla."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                        "-of", "csv=p=0", str(img)], capture_output=True, text=True)
+    try:
+        w, h = [int(x) for x in r.stdout.strip().split(",")[:2]]
+    except ValueError:
+        raise RuntimeError("Una de las imágenes no se pudo leer (¿está dañada o no es una imagen?).")
+    k = min(maxw / w, maxh / h)
+    w2, h2 = int(w * k) // 2 * 2, int(h * k) // 2 * 2
+    return f"{max(2, w2)}x{max(2, h2)}"

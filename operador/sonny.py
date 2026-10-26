@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import comun
-from editor import info_video, renderizar
+from editor import info_video, renderizar, renderizar_visual
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -29,8 +29,16 @@ def main(mision_id):
         comun.reportar(mision_id, "progreso", agente="sonny", texto=texto)
 
     destino = carpeta / "reel.mp4"
-    total = renderizar(video, t["cortes"], t["segmentos"], t.get("titulo", ""), t.get("formato", "vertical"),
-                       carpeta, destino, conf, avisar=avisar)
+    if t.get("modo") == "visual":
+        imagenes = []
+        for i, img_id in enumerate(t.get("imagenes") or [], 1):
+            avisar(f"Descargando imagen {i} de {len(t['imagenes'])}")
+            imagenes.append(comun.descargar_drive(img_id, carpeta / f"imagen_{i:02d}"))
+        total = renderizar_visual(video, imagenes, t.get("formato", "vertical"), carpeta, destino, conf,
+                                  audio=t.get("audio", "silencio"), titulo=t.get("titulo", ""), avisar=avisar)
+    else:
+        total = renderizar(video, t["cortes"], t["segmentos"], t.get("titulo", ""), t.get("formato", "vertical"),
+                           carpeta, destino, conf, avisar=avisar)
 
     extra = {}
     if t.get("maestra_url"):

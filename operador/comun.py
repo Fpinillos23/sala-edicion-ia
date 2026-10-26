@@ -59,7 +59,7 @@ def descargar_drive(file_id, destino):
     # Respaldo: gdown resuelve los avisos de "archivo grande" de Drive
     subprocess.run(["gdown", "--quiet", "--id", file_id, "-O", str(destino)], check=False)
     if not destino.exists() or destino.stat().st_size == 0:
-        raise RuntimeError("No pude descargar el video de Drive. ¿Está compartido por enlace?")
+        raise RuntimeError("No pude descargar un archivo de Drive (video o imagen). ¿Está compartido por enlace?")
     return destino
 
 
