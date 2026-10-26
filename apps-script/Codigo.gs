@@ -43,11 +43,12 @@ function configurar() {
   if (!prop_('CLAVE_SALA')) P_().setProperty('CLAVE_SALA', Utilities.getUuid().replace(/-/g, ''));
   const c = carpetas_();
 
-  const w = tg_('setWebhook', {
-    url: prop_('URL_WEBAPP') + '?k=' + prop_('CLAVE_SALA'),
-    drop_pending_updates: true,
-    allowed_updates: ['message', 'callback_query'],
-  });
+  // Telegram no tolera la redirección (302) con la que responde Apps Script, y eso atasca los mensajes.
+  // Por eso la sala RECOGE los mensajes con getUpdates cada minuto, en vez de usar webhook.
+  const w = tg_('deleteWebhook', { drop_pending_updates: true });
+  P_().deleteProperty('TG_OFFSET');
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'revisarTelegram').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('revisarTelegram').timeBased().everyMinutes(1).create();
   tg_('setMyCommands', { commands: [
     { command: 'estado', description: 'Cómo va la misión' },
     { command: 'drive', description: 'Usar un video de la carpeta de Drive' },
@@ -57,7 +58,7 @@ function configurar() {
   ] });
   if (!prop_('SALA')) salaEvento_('jason', 'espera', 'Sala instalada. Esperando material.', { mision: null });
 
-  Logger.log('Webhook de Telegram: ' + (w && w.ok ? 'activo ✅' : 'ERROR ' + JSON.stringify(w)));
+  Logger.log('Telegram: ' + (w && w.ok ? 'recogida de mensajes cada minuto activa ✅' : 'ERROR ' + JSON.stringify(w)));
   Logger.log('Mandy (' + (prop_('GEMINI_API_KEY') ? 'Gemini' : 'Groq') + '): ' + probarIA_());
   const gh = UrlFetchApp.fetch('https://api.github.com/repos/' + prop_('GITHUB_REPO'), {
     muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + prop_('GITHUB_TOKEN'), Accept: 'application/vnd.github+json' } });
@@ -79,9 +80,11 @@ function diagnosticar() {
   if (!w.ok) return Logger.log('No pude leer el webhook: ' + JSON.stringify(w));
   const r = w.result || {};
   const url = String(r.url || '');
-  Logger.log('Webhook apunta a esta app: ' + (url.indexOf(prop_('URL_WEBAPP')) === 0 ? 'sí ✅' : 'NO ❌ (' + url.split('?')[0] + ')'));
+  const activadores = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'revisarTelegram').length;
+  Logger.log('Recepción de mensajes: ' + (!url && activadores ? 'recogida cada minuto ✅' :
+    (url ? 'webhook activo ❌ (ejecuta configurar para cambiar al modo de recogida)' : 'falta el activador ❌ (ejecuta configurar)')));
   Logger.log('Mensajes en espera: ' + (r.pending_update_count || 0));
-  Logger.log('Último error de entrega: ' + (r.last_error_message ? r.last_error_message + ' (' + new Date(r.last_error_date * 1000) + ')' : 'ninguno ✅'));
+  if (url) Logger.log('Último error de entrega: ' + (r.last_error_message || 'ninguno'));
   Logger.log('Dueño registrado: ' + (prop_('CHAT_DUENO') ? 'sí ✅' : 'todavía no (falta el primer /start)'));
   if (prop_('CHAT_DUENO')) {
     const r = tg_('sendMessage', { chat_id: prop_('CHAT_DUENO'), text: '🎖 Jason Hayes: prueba de comunicación desde el diagnóstico.' });
@@ -89,6 +92,42 @@ function diagnosticar() {
   }
   try { sesionSubidaDrive_({ nombre: 'prueba.mp4' }); Logger.log('Copia maestra en Drive: permiso de subida ✅ (la prueba no crea archivos)'); }
   catch (e) { Logger.log('Copia maestra en Drive: ERROR — ' + (e.message || e)); }
+}
+
+/**
+ * Activador de cada minuto: recoge los mensajes nuevos de Telegram y los atiende.
+ * Si hay conversación activa, sigue escuchando unos segundos para que las respuestas sean rápidas.
+ */
+function revisarTelegram() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return; // otra revisión u operador está trabajando
+  try {
+    const inicio = Date.now();
+    let activo = false, vacios = 0;
+    while (Date.now() - inicio < 40000) { // tope por revisión: cuida la cuota de 90 min/día de los activadores
+      const offset = parseInt(prop_('TG_OFFSET', '0'), 10);
+      const datos = { timeout: activo ? 8 : 0, allowed_updates: ['message', 'callback_query'] };
+      if (offset) datos.offset = offset;
+      const r = tg_('getUpdates', datos);
+      if (!r.ok) break;
+      const lista = r.result || [];
+      lista.forEach(u => {
+        P_().setProperty('TG_OFFSET', String(u.update_id + 1)); // se marca antes, para no repetirlo si algo falla
+        try { telegram_(u); } catch (err) { avisarError_(err); }
+      });
+      if (lista.length) { activo = true; vacios = 0; }
+      else if (!activo || ++vacios >= 2) break; // tras tu último mensaje escucha ~16-25 s más
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function avisarError_(err) {
+  console.error('Error atendiendo Telegram: ' + (err && err.stack || err));
+  const m = mision_();
+  const chat = (m && m.chat) || prop_('CHAT_DUENO');
+  if (chat) enviar_(chat, '⚠️ <b>Jason Hayes</b>: tuvimos un problema.\n<code>' + esc_(String(err.message || err)).slice(0, 600) + '</code>');
 }
 
 function carpetas_() {
