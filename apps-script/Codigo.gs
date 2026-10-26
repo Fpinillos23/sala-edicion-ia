@@ -83,6 +83,8 @@ function diagnosticar() {
   Logger.log('Mensajes en espera: ' + (r.pending_update_count || 0));
   Logger.log('Último error de entrega: ' + (r.last_error_message ? r.last_error_message + ' (' + new Date(r.last_error_date * 1000) + ')' : 'ninguno ✅'));
   Logger.log('Dueño registrado: ' + (prop_('CHAT_DUENO') ? 'sí ✅' : 'todavía no (falta el primer /start)'));
+  try { sesionSubidaDrive_({ nombre: 'prueba.mp4' }); Logger.log('Copia maestra en Drive: permiso de subida ✅ (la prueba no crea archivos)'); }
+  catch (e) { Logger.log('Copia maestra en Drive: ERROR — ' + (e.message || e)); }
 }
 
 function carpetas_() {
@@ -257,7 +259,7 @@ function boton_(q) {
     guardarMision_(m);
     return escribirGuion_(chat, m);
   }
-  if (d === 'aprobar' && m.estado === 'revision') return aprobar_(chat, m);
+  if ((d === 'aprobar' || d === 'aprobar_maestra') && m.estado === 'revision') return aprobar_(chat, m, d === 'aprobar_maestra');
   if (d === 'cambiar' && m.estado === 'revision') {
     m.estado = 'ajuste'; guardarMision_(m);
     salaEvento_('mando', 'trabajando', 'Mando pidió ajustes al guion.', { mision: resumenSala_(m, 4) });
@@ -450,7 +452,10 @@ function operador_(b) {
     guardarGuionEnDrive_(m);
     const s = salaLeer_(); s.stats = s.stats || { reels: 0 }; s.stats.reels = (s.stats.reels || 0) + 1; salaGuardar_(s);
     salaEvento_('sonny', 'listo', 'Reel entregado. Misión cumplida.', { mision: resumenSala_(m, 7) });
-    return enviar_(m.chat, '🎖 <b>Jason Hayes</b>: misión cumplida, comandante. El guion quedó guardado en la carpeta <b>salida</b> de Drive.',
+    let maestra = '';
+    if (b.maestra_id) maestra = '\n💾 Copia maestra (sin recomprimir, ' + (b.maestra_mb || '?') + ' MB): https://drive.google.com/file/d/' + b.maestra_id + '/view';
+    else if (b.maestra_error) maestra = '\n⚠️ La copia maestra no se pudo guardar en Drive; el reel de Telegram sí está completo.';
+    return enviar_(m.chat, '🎖 <b>Jason Hayes</b>: misión cumplida, comandante. El guion quedó guardado en la carpeta <b>salida</b> de Drive.' + maestra,
       [[{ text: '🎬 Otro reel con este video', callback_data: 'otro' }], [{ text: '✅ Cerrar misión', callback_data: 'cerrar' }]]);
   }
 }
@@ -542,10 +547,12 @@ function escribirGuion_(chat, m) {
   m.estado = 'revision'; guardarMision_(m);
   salaEvento_('mandy', 'listo', 'Guion listo. Esperando aprobación del mando.', { mision: resumenSala_(m, 5) });
   salaEvento_('mando', 'trabajando', 'Revisando el guion de Mandy.', { mision: resumenSala_(m, 5) });
-  enviar_(chat, guionTelegram_(g, cortes), [
-    [{ text: '✅ Aprobar y editar', callback_data: 'aprobar' }],
-    [{ text: '✏️ Pedir cambios', callback_data: 'cambiar' }, { text: '❌ Cancelar', callback_data: 'cancelar' }],
-  ]);
+  const largo = duracionCortes_(cortes) > 60;
+  const aprobar = largo
+    ? [[{ text: '✅ Aprobar y editar (+ copia maestra en Drive)', callback_data: 'aprobar' }]]
+    : [[{ text: '✅ Aprobar y editar', callback_data: 'aprobar' }], [{ text: '💾 Aprobar + copia maestra en Drive', callback_data: 'aprobar_maestra' }]];
+  enviar_(chat, guionTelegram_(g, cortes) + (largo ? '\n\n💾 Como pasa de 1 minuto, Sonny guardará también la copia maestra en Drive.' : ''),
+    aprobar.concat([[{ text: '✏️ Pedir cambios', callback_data: 'cambiar' }, { text: '❌ Cancelar', callback_data: 'cancelar' }]]));
 }
 
 function promptGuion_(transcripcion, respuestas, duracion, ajustes) {
@@ -561,13 +568,48 @@ function promptGuion_(transcripcion, respuestas, duracion, ajustes) {
     '  "vacios_de_informacion": ["dato que falta y no se debe inventar"]\n}';
 }
 
-function aprobar_(chat, m) {
+function aprobar_(chat, m, pidioMaestra) {
+  const t = leerTrabajo_(m);
+  const quiereMaestra = pidioMaestra || duracionCortes_(t.cortes || []) > 60;
+  t.maestra_url = '';
+  let avisoMaestra = '';
+  if (quiereMaestra) {
+    try {
+      t.maestra_url = sesionSubidaDrive_(m);
+      avisoMaestra = '\n💾 También guardará la copia maestra en tu carpeta <b>salida</b> de Drive.';
+    } catch (e) {
+      avisoMaestra = '\n⚠️ No pude preparar la copia maestra en Drive (' + esc_(String(e.message || e)).slice(0, 150) + '). Te llega solo por Telegram.';
+    }
+  }
+  guardarTrabajo_(m, t);
   m.estado = 'editando'; guardarMision_(m);
   compartir_(m.video_id, true);
   despachar_('editar', m);
   salaEvento_('mando', 'listo', 'Guion aprobado. Luz verde para Bravo 3.', { mision: resumenSala_(m, 6) });
   salaEvento_('sonny', 'trabajando', 'Orden recibida. Preparando el equipo.', { mision: resumenSala_(m, 6) });
-  enviar_(chat, '🎖 <b>Jason Hayes</b>: guion aprobado. <b>Sonny Quinn</b> en camino; te entrega el reel aquí mismo en unos minutos.');
+  enviar_(chat, '🎖 <b>Jason Hayes</b>: guion aprobado. <b>Sonny Quinn</b> en camino; te entrega el reel aquí mismo en unos minutos.' + avisoMaestra);
+}
+
+function duracionCortes_(cortes) {
+  return (cortes || []).reduce((s, c) => s + (Number(c.fin) - Number(c.inicio)), 0);
+}
+
+/**
+ * Crea una sesión de subida de un solo uso en la carpeta "salida" de Drive.
+ * Sonny solo recibe esa dirección: sirve para subir ESE archivo y nada más.
+ */
+function sesionSubidaDrive_(m) {
+  const fecha = Utilities.formatDate(new Date(), 'America/Bogota', 'yyyyMMdd-HHmm');
+  const nombre = m.nombre.replace(/\.[^.]+$/, '') + '_reel_maestro_' + fecha + '.mp4';
+  const r = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true', {
+    method: 'post', contentType: 'application/json; charset=UTF-8', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'X-Upload-Content-Type': 'video/mp4' },
+    payload: JSON.stringify({ name: nombre, parents: [carpeta_('salida').getId()], mimeType: 'video/mp4' }),
+  });
+  const h = r.getAllHeaders();
+  const url = h.Location || h.location;
+  if (r.getResponseCode() !== 200 || !url) throw new Error('Drive respondió ' + r.getResponseCode());
+  return url;
 }
 
 /** Mandy piensa con Gemini (gratis) o, si no hay clave de Gemini, con Groq. */
@@ -711,6 +753,7 @@ function trabajoParaOperador_(m) {
   return {
     video_id: m.video_id, nombre: m.nombre, chat_id: m.chat,
     segmentos: t.segmentos || [], cortes: t.cortes || [], titulo: m.titulo || '', formato: m.formato || 'vertical',
+    maestra_url: t.maestra_url || '',
     conf: { color: prop_('COLOR_MARCA', '#E30613'), fuente: prop_('FUENTE', 'Liberation Sans'), segundos_titulo: prop_('SEGUNDOS_TITULO', '0') },
   };
 }

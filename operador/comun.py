@@ -87,3 +87,19 @@ def enviar_video(chat_id, ruta, leyenda, ancho, alto, duracion):
     if r.status_code >= 400:
         raise RuntimeError(f"Telegram no aceptó el video (código {r.status_code}).")
     return r.json().get("result", {}).get("message_id")
+
+
+def subir_maestra(url_sesion, ruta):
+    """Sube el reel original a Drive usando la sesión de un solo uso que preparó el Apps Script.
+    Devuelve el id del archivo en Drive, o None si falla (sin imprimir la dirección de la sesión)."""
+    ruta = Path(ruta)
+    try:
+        with open(ruta, "rb") as f:
+            r = requests.put(url_sesion, data=f, timeout=1800, headers={
+                "Content-Type": "video/mp4", "Content-Length": str(ruta.stat().st_size)})
+        if r.status_code in (200, 201):
+            return r.json().get("id")
+        print(f"   Drive no aceptó la copia maestra (código {r.status_code}).")
+    except (requests.RequestException, ValueError):
+        print("   No se pudo subir la copia maestra a Drive.")
+    return None

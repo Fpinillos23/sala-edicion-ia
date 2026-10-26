@@ -32,13 +32,22 @@ def main(mision_id):
     total = renderizar(video, t["cortes"], t["segmentos"], t.get("titulo", ""), t.get("formato", "vertical"),
                        carpeta, destino, conf, avisar=avisar)
 
+    extra = {}
+    if t.get("maestra_url"):
+        avisar("Guardando la copia maestra en Drive")
+        mid = comun.subir_maestra(t["maestra_url"], destino)
+        if mid:
+            extra = {"maestra_id": mid, "maestra_mb": round(destino.stat().st_size / 1_048_576, 1)}
+        else:
+            extra = {"maestra_error": True}
+
     avisar("Enviando el reel a Telegram")
     final = comun.ajustar_peso(destino, total)
     info = info_video(final)
     leyenda = f"🎬 <b>{html.escape(t.get('titulo') or 'Reel listo')}</b>\nSonny Quinn: misión cumplida ({total:.0f} s)."
     comun.enviar_video(t["chat_id"], final, leyenda, info["ancho"], info["alto"], total)
     comun.reportar(mision_id, "listo", agente="sonny", duracion=round(total, 1),
-                   peso_mb=round(final.stat().st_size / 1_048_576, 1))
+                   peso_mb=round(final.stat().st_size / 1_048_576, 1), **extra)
 
 
 if __name__ == "__main__":
