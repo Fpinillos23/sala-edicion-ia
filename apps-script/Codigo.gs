@@ -441,6 +441,13 @@ function iniciarMision_(chat, archivo) {
 
 /** Comparte el video por enlace solo mientras un operador lo necesita. */
 function compartir_(id, abrir) {
+  if (abrir) {
+    // Si el video ya se puede abrir por enlace (por ejemplo, porque la carpeta lo hereda), no hay nada que cambiar.
+    try {
+      const acc = DriveApp.getFileById(id).getSharingAccess();
+      if (acc === DriveApp.Access.ANYONE_WITH_LINK || acc === DriveApp.Access.ANYONE) return true;
+    } catch (e) { /* se intenta compartir abajo */ }
+  }
   try {
     DriveApp.getFileById(id).setSharing(abrir ? DriveApp.Access.ANYONE_WITH_LINK : DriveApp.Access.PRIVATE,
       abrir ? DriveApp.Permission.VIEW : DriveApp.Permission.NONE);
@@ -485,7 +492,11 @@ function probarCompartir() {
   let dueno = '?';
   try { dueno = f.getOwner() ? f.getOwner().getEmail() : '(unidad compartida)'; } catch (e) { dueno = 'no disponible'; }
   Logger.log('Video: ' + f.getName() + ' — dueño: ' + dueno);
-  Logger.log('Acceso actual: ' + f.getSharingAccess() + ' / ' + f.getSharingPermission());
+  Logger.log('Acceso actual del video: ' + f.getSharingAccess() + ' / ' + f.getSharingPermission());
+  const ent = carpeta_('entrada'), base = DriveApp.getFolderById(prop_('CARPETA_ID'));
+  Logger.log('Carpeta "entrada": ' + ent.getSharingAccess() + ' / ' + ent.getSharingPermission());
+  Logger.log('Carpeta "Sala de Edición IA": ' + base.getSharingAccess() + ' / ' + base.getSharingPermission());
+  const padres = f.getParents(); while (padres.hasNext()) { const p = padres.next(); Logger.log('Carpeta que contiene el video: "' + p.getName() + '" — ' + p.getSharingAccess() + ' / ' + p.getSharingPermission()); }
   try { compartirApi_(f.getId(), true); Logger.log('Compartir por enlace (solo lectura) con la API de Drive: funciona ✅'); }
   catch (e) { Logger.log('Compartir por enlace: ERROR — ' + (e.message || e)); }
   try { compartirApi_(f.getId(), false); Logger.log('Volver a privado: funciona ✅'); }
