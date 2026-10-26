@@ -1,3 +1,3 @@
-// Pega aquí la URL /exec de tu Apps Script (la imprime la función configurar()).
-// Si la dejas vacía, la sala se muestra en modo demostración.
-window.SALA_API = "";
+// URL /exec del Apps Script de la Sala de Edición IA (la imprime la función configurar()).
+// Sin la clave secreta, esta dirección solo entrega el estado público de la sala.
+window.SALA_API = "https://script.google.com/macros/s/AKfycbzouChn4NtfCRLURgj7rZi9scW6RuhEz5F3qrA68iZasyqCNAI3iVYrFeq3TRwJGKfieg/exec";
