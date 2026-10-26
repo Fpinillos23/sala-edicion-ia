@@ -446,9 +446,33 @@ function compartir_(id, abrir) {
       abrir ? DriveApp.Permission.VIEW : DriveApp.Permission.NONE);
     return true;
   } catch (e) {
-    console.error('No se pudo cambiar el acceso del video: ' + (e.message || e));
-    P_().setProperty('ULTIMO_ERROR_COMPARTIR', String(e.message || e).slice(0, 300));
-    return !abrir;
+    // DriveApp puede negar el cambio ("Acceso denegado: DriveApp"); se intenta con la API de Drive.
+    try { compartirApi_(id, abrir); return true; } catch (e2) {
+      console.error('No se pudo cambiar el acceso del video: ' + (e2.message || e2));
+      P_().setProperty('ULTIMO_ERROR_COMPARTIR', String(e2.message || e2).slice(0, 300));
+      return !abrir;
+    }
+  }
+}
+
+/** Abre (solo lectura, cualquiera con el enlace) o cierra el acceso por enlace usando la API de Drive. */
+function compartirApi_(id, abrir) {
+  const base = 'https://www.googleapis.com/drive/v3/files/' + id + '/permissions';
+  const h = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  const lista = UrlFetchApp.fetch(base + '?fields=permissions(id,type,role)', { headers: h, muteHttpExceptions: true });
+  if (lista.getResponseCode() !== 200) throw new Error('Drive (lista de permisos) respondió ' + lista.getResponseCode());
+  const publicos = (JSON.parse(lista.getContentText()).permissions || []).filter(p => p.type === 'anyone');
+  // Siempre se quitan los accesos públicos previos (por ejemplo, "cualquiera con el enlace puede editar").
+  publicos.forEach(p => {
+    const r = UrlFetchApp.fetch(base + '/' + p.id, { method: 'delete', headers: h, muteHttpExceptions: true });
+    if (r.getResponseCode() >= 300) throw new Error('Drive (quitar acceso público) respondió ' + r.getResponseCode());
+  });
+  if (abrir) {
+    const r = UrlFetchApp.fetch(base, {
+      method: 'post', contentType: 'application/json', headers: h, muteHttpExceptions: true,
+      payload: JSON.stringify({ role: 'reader', type: 'anyone', allowFileDiscovery: false }),
+    });
+    if (r.getResponseCode() >= 300) throw new Error('Drive (compartir por enlace) respondió ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 150));
   }
 }
 
@@ -462,14 +486,11 @@ function probarCompartir() {
   try { dueno = f.getOwner() ? f.getOwner().getEmail() : '(unidad compartida)'; } catch (e) { dueno = 'no disponible'; }
   Logger.log('Video: ' + f.getName() + ' — dueño: ' + dueno);
   Logger.log('Acceso actual: ' + f.getSharingAccess() + ' / ' + f.getSharingPermission());
-  try {
-    f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    Logger.log('Compartir por enlace: funciona ✅');
-    f.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
-    Logger.log('Volver a privado: funciona ✅');
-  } catch (e) {
-    Logger.log('Compartir por enlace: ERROR — ' + (e.message || e));
-  }
+  try { compartirApi_(f.getId(), true); Logger.log('Compartir por enlace (solo lectura) con la API de Drive: funciona ✅'); }
+  catch (e) { Logger.log('Compartir por enlace: ERROR — ' + (e.message || e)); }
+  try { compartirApi_(f.getId(), false); Logger.log('Volver a privado: funciona ✅'); }
+  catch (e) { Logger.log('Volver a privado: ERROR — ' + (e.message || e)); }
+  Logger.log('Acceso final: ' + DriveApp.getFileById(f.getId()).getSharingAccess());
 }
 
 function despachar_(tipo, m) {
