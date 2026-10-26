@@ -71,6 +71,20 @@ function configurar() {
   Logger.log('Ahora abre tu bot en Telegram y envíale /start');
 }
 
+/** Diagnóstico: muestra cómo ve Telegram al bot y al webhook (sin mostrar claves). */
+function diagnosticar() {
+  const yo = tg_('getMe', {});
+  Logger.log('Bot: ' + (yo.ok ? '@' + yo.result.username + ' ✅' : 'ERROR — revisa TELEGRAM_TOKEN: ' + JSON.stringify(yo)));
+  const w = tg_('getWebhookInfo', {});
+  if (!w.ok) return Logger.log('No pude leer el webhook: ' + JSON.stringify(w));
+  const r = w.result || {};
+  const url = String(r.url || '');
+  Logger.log('Webhook apunta a esta app: ' + (url.indexOf(prop_('URL_WEBAPP')) === 0 ? 'sí ✅' : 'NO ❌ (' + url.split('?')[0] + ')'));
+  Logger.log('Mensajes en espera: ' + (r.pending_update_count || 0));
+  Logger.log('Último error de entrega: ' + (r.last_error_message ? r.last_error_message + ' (' + new Date(r.last_error_date * 1000) + ')' : 'ninguno ✅'));
+  Logger.log('Dueño registrado: ' + (prop_('CHAT_DUENO') ? 'sí ✅' : 'todavía no (falta el primer /start)'));
+}
+
 function carpetas_() {
   let base = prop_('CARPETA_ID');
   let carpeta;
