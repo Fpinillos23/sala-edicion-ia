@@ -97,6 +97,7 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 - Responde las preguntas de Mandy. Si no sabes algo, `/saltar`: quedará como *vacío de información*, nunca se inventa.
 - Elige duración y formato, revisa el guion y pulsa **Aprobar y editar** o **Pedir cambios**.
 - Sonny te envía el reel al chat. El guion queda en **Sala de Edición IA › salida**.
+- **Copia maestra en Drive** (el reel original, sin recomprimir): pídela con el botón **💾 Aprobar + copia maestra en Drive**. En reels de más de 1 minuto se guarda sola. Jason te envía el enlace al terminar. Sonny solo recibe un permiso de subida de un solo uso para ese archivo, nunca acceso a tu Drive.
 - Comandos: `/estado`, `/drive`, `/saltar`, `/cancelar`, `/ayuda`.
 
 ## Personalizar (Propiedades del script, opcionales)
