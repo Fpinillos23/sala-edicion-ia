@@ -5,9 +5,9 @@
  *  Jason Hayes (Bravo 1) ... coordina la misión y te reporta por Telegram
  *  Lisa Davis (Inteligencia) transcribe el video  ─┐ trabajan en
  *  Sonny Quinn (Bravo 3) ... corta y entrega el reel ┘ GitHub Actions
- *  Mandy Ellis (Enlace) .... te interroga y escribe el guion (aquí, con Groq)
+ *  Mandy Ellis (Enlace) .... te interroga y escribe el guion (aquí, con Gemini)
  *
- *  Todo gratis: Apps Script + Telegram + Groq + GitHub Actions (repo público).
+ *  Todo gratis: Apps Script + Telegram + Gemini (o Groq) + GitHub Actions (repo público).
  *  Instalación: ver INSTALACION.md
  */
 
@@ -36,7 +36,8 @@ function prop_(k, def) { const v = P_().getProperty(k); return (v === null || v 
 
 /** Ejecútala UNA vez después de implementar la aplicación web y llenar las propiedades. */
 function configurar() {
-  const faltan = ['TELEGRAM_TOKEN', 'GROQ_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPO', 'URL_WEBAPP'].filter(k => !prop_(k));
+  const faltan = ['TELEGRAM_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPO', 'URL_WEBAPP'].filter(k => !prop_(k));
+  if (!prop_('GEMINI_API_KEY') && !prop_('GROQ_API_KEY')) faltan.push('GEMINI_API_KEY');
   if (faltan.length) throw new Error('Faltan estas propiedades del script: ' + faltan.join(', '));
   if (!/\/exec$/.test(prop_('URL_WEBAPP'))) throw new Error('URL_WEBAPP debe terminar en /exec (la URL de la implementación).');
   if (!prop_('CLAVE_SALA')) P_().setProperty('CLAVE_SALA', Utilities.getUuid().replace(/-/g, ''));
@@ -450,7 +451,7 @@ const REGLAS_MANDY = 'Eres MANDY ELLIS, guionista de la sala de edición de {med
 function iniciarInterrogatorio_(m, segmentos) {
   salaEvento_('mandy', 'trabajando', 'Revisando la transcripción.', { mision: resumenSala_(m, 3) });
   tg_('sendChatAction', { chat_id: m.chat, action: 'typing' });
-  const r = groq_('Lee la transcripción y prepárate para hacer un reel.\n\nTRANSCRIPCIÓN:\n' + transcripcionTexto_(segmentos) +
+  const r = ia_('Lee la transcripción y prepárate para hacer un reel.\n\nTRANSCRIPCIÓN:\n' + transcripcionTexto_(segmentos) +
     '\n\nDevuelve este JSON:\n{"resumen": "2 o 3 frases sobre de qué trata el video", "preguntas": ["pregunta 1", "..."]}\n' +
     'Haz entre 2 y 5 preguntas, solo las que de verdad necesites para un buen guion: quién habla y su cargo si no queda claro, ' +
     'el contexto del hecho, el enfoque o mensaje principal que busca el periodista, o datos dudosos (nombres o cifras que la transcripción pudo entender mal).');
@@ -509,7 +510,7 @@ function escribirGuion_(chat, m) {
   let g = null, cortes = [];
   for (let intento = 0; intento < 2 && !cortes.length; intento++) {
     const ajustes = intento === 0 ? m.ajustes : 'Los cortes anteriores no eran válidos. Usa tiempos que existan en la transcripción.';
-    g = groq_(promptGuion_(transcripcionTexto_(t.segmentos), respuestas, m.duracion, ajustes));
+    g = ia_(promptGuion_(transcripcionTexto_(t.segmentos), respuestas, m.duracion, ajustes));
     cortes = ajustarCortes_(g.cortes, t.segmentos, t.duracion || 1e9);
   }
   if (!cortes.length) {
@@ -551,8 +552,39 @@ function aprobar_(chat, m) {
   enviar_(chat, '🎖 <b>Jason Hayes</b>: guion aprobado. <b>Sonny Quinn</b> en camino; te entrega el reel aquí mismo en unos minutos.');
 }
 
-function groq_(usuario) {
+/** Mandy piensa con Gemini (gratis) o, si no hay clave de Gemini, con Groq. */
+function ia_(usuario) {
   const sistema = REGLAS_MANDY.replace('{medio}', prop_('NOMBRE_MEDIO', 'Torre Informativa'));
+  return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario) : groq_(sistema, usuario);
+}
+
+function gemini_(sistema, usuario) {
+  const modelo = prop_('MODELO_GEMINI', 'gemini-3.8-flash');
+  for (let i = 0; i < 3; i++) {
+    const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-goog-api-key': prop_('GEMINI_API_KEY') },
+      payload: JSON.stringify({
+        systemInstruction: { parts: [{ text: sistema }] },
+        contents: [{ role: 'user', parts: [{ text: usuario }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
+      }),
+    });
+    const c = r.getResponseCode();
+    if (c === 200) {
+      try {
+        const d = JSON.parse(r.getContentText());
+        return JSON.parse(d.candidates[0].content.parts.map(p => p.text || '').join(''));
+      } catch (e) { continue; }
+    }
+    if ((c === 429 || c === 503) && i < 2) { Utilities.sleep(15000); continue; }
+    if (c === 400 || c === 403) throw new Error('Gemini rechazó la petición (' + c + '). Revisa GEMINI_API_KEY o MODELO_GEMINI.');
+    throw new Error('Gemini respondió ' + c + ': ' + r.getContentText().slice(0, 200));
+  }
+  throw new Error('Mandy no logró una respuesta válida. Intenta de nuevo.');
+}
+
+function groq_(sistema, usuario) {
   const modelo = prop_('MODELO_GUIONISTA', 'llama-3.3-70b-versatile');
   for (let i = 0; i < 3; i++) {
     const r = UrlFetchApp.fetch('https://api.groq.com/openai/v1/chat/completions', {

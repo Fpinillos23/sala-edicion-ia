@@ -88,3 +88,82 @@ def transcribir(cliente, video, carpeta_trabajo, modelo, idioma="es"):
 def como_texto(segmentos):
     """Formato que lee el Guionista: [inicio-fin] texto"""
     return "\n".join(f"[{s['inicio']:.1f}-{s['fin']:.1f}] {s['texto']}" for s in segmentos)
+
+
+# ───────────── Alternativa gratuita: Gemini (cuando no hay clave de Groq) ─────────────
+
+PROMPT_GEMINI = (
+    "Transcribe este audio en español, palabra por palabra, sin resumir ni corregir el sentido. "
+    "Divide la transcripción en frases cortas (de 3 a 12 segundos cada una). "
+    "Devuelve SOLO un arreglo JSON con este formato: "
+    '[{"inicio": "MM:SS", "fin": "MM:SS", "texto": "lo que se dice"}]. '
+    "Los tiempos son relativos al inicio de este audio. Si un tramo no tiene voz, omítelo. "
+    "No inventes palabras que no se escuchen."
+)
+
+
+def _a_segundos(t):
+    try:
+        partes = [float(x) for x in str(t).strip().split(":")]
+    except ValueError:
+        return None
+    s = 0.0
+    for p in partes:
+        s = s * 60 + p
+    return s
+
+
+def _pedir_gemini(clave, modelo, audio_bytes):
+    import base64
+    import time
+    import requests
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
+    cuerpo = {
+        "contents": [{"role": "user", "parts": [
+            {"inline_data": {"mime_type": "audio/mp3", "data": base64.b64encode(audio_bytes).decode()}},
+            {"text": PROMPT_GEMINI},
+        ]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.0},
+    }
+    for intento in range(4):
+        r = requests.post(url, headers={"x-goog-api-key": clave}, json=cuerpo, timeout=300)
+        if r.status_code == 200:
+            texto = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            datos = json.loads(texto)
+            return datos if isinstance(datos, list) else datos.get("segmentos", [])
+        if r.status_code in (429, 500, 503) and intento < 3:
+            print("   Gemini pidió una pausa; espero 30 segundos...")
+            time.sleep(30)
+            continue
+        raise RuntimeError(f"Gemini respondió {r.status_code} al transcribir.")
+    return []
+
+
+def transcribir_gemini(clave, video, carpeta_trabajo, modelo="gemini-3.8-flash"):
+    """Transcribe con Gemini en trozos de 10 minutos. Las marcas de tiempo llegan al segundo."""
+    carpeta_trabajo = Path(carpeta_trabajo)
+    audio = carpeta_trabajo / "audio.mp3"
+    print("   Extrayendo audio...")
+    _ffmpeg(["-i", str(video), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", str(audio)])
+    _ffmpeg(["-i", "audio.mp3", "-f", "segment", "-segment_time", "600", "-c", "copy", "parte_%03d.mp3"],
+            cwd=str(carpeta_trabajo))
+    piezas = sorted(carpeta_trabajo.glob("parte_*.mp3")) or [audio]
+
+    segmentos, desfase = [], 0.0
+    for i, pieza in enumerate(piezas, 1):
+        print(f"   Transcribiendo parte {i} de {len(piezas)} con Gemini...")
+        largo = duracion(pieza)
+        for s in _pedir_gemini(clave, modelo, pieza.read_bytes()):
+            ini, fin = _a_segundos(s.get("inicio")), _a_segundos(s.get("fin"))
+            texto = str(s.get("texto") or "").strip()
+            if ini is None or fin is None or not texto:
+                continue
+            if ini < 0 or ini >= largo - 0.2:
+                continue  # tiempo fuera de este trozo de audio: se descarta, no se inventa
+            fin = min(fin, largo)
+            if fin <= ini:
+                fin = min(ini + 2.0, largo)
+            segmentos.append({"inicio": round(ini + desfase, 2), "fin": round(fin + desfase, 2), "texto": texto})
+        desfase += largo
+    segmentos.sort(key=lambda s: s["inicio"])
+    return segmentos

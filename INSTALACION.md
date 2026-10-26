@@ -6,7 +6,7 @@ Tu sala de edición funciona igual que la sala de redacción: hablas con un bot 
 |---|---|---|
 | **Jason Hayes** (Bravo 1) | Coordina la misión y te reporta | Apps Script |
 | **Lisa Davis** (Inteligencia) | Transcribe el video | GitHub Actions |
-| **Mandy Ellis** (Enlace) | Te pregunta lo que falta y escribe el guion con la guía de cortes | Apps Script + Groq |
+| **Mandy Ellis** (Enlace) | Te pregunta lo que falta y escribe el guion con la guía de cortes | Apps Script + Gemini |
 | **Sonny Quinn** (Bravo 3) | Corta, subtitula y te entrega el reel | GitHub Actions |
 | **Tú** (Mando) | Apruebas cada guion antes de editar | Telegram |
 
@@ -20,9 +20,11 @@ La instalación toma unos 30 minutos y se hace una sola vez. Sigue el orden: cad
 2. Ponle un nombre (por ejemplo, *Sala de Edición TI*) y un usuario que termine en `bot`.
 3. Copia el **token** que te entrega. Lo llamaremos `TELEGRAM_TOKEN`.
 
-## 2. Clave de Groq
+## 2. Clave de Gemini
 
-Puedes usar la misma clave gratuita de tu sala de redacción, o crear otra en https://console.groq.com/keys. La llamaremos `GROQ_API_KEY`.
+Usa tu clave gratuita de Gemini (se crea en https://aistudio.google.com/apikey). La llamaremos `GEMINI_API_KEY`.
+
+> **Opcional:** si además agregas una clave de Groq como `GROQ_API_KEY` (en GitHub), Lisa transcribirá con Whisper, que da marcas de tiempo más finas que Gemini (Gemini marca al segundo).
 
 ## 3. Repositorio en GitHub
 
@@ -48,7 +50,7 @@ Puedes usar la misma clave gratuita de tu sala de redacción, o crear otra en ht
    | Propiedad | Valor |
    |---|---|
    | `TELEGRAM_TOKEN` | token del paso 1 |
-   | `GROQ_API_KEY` | clave del paso 2 |
+   | `GEMINI_API_KEY` | clave del paso 2 |
    | `GITHUB_TOKEN` | token del paso 3 |
    | `GITHUB_REPO` | `tu-usuario/sala-edicion-ia` |
    | `URL_WEBAPP` | la URL `/exec` del punto 3 |
@@ -64,7 +66,7 @@ En el repositorio: **Settings** → **Secrets and variables** → **Actions** �
 | Secreto | Valor |
 |---|---|
 | `TELEGRAM_TOKEN` | token del paso 1 |
-| `GROQ_API_KEY` | clave del paso 2 |
+| `GEMINI_API_KEY` | clave del paso 2 |
 | `SALA_API` | valor que imprimió `configurar` |
 | `SALA_CLAVE` | valor que imprimió `configurar` |
 
@@ -105,7 +107,7 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 | `NOMBRE_MEDIO` | Medio que firma los guiones | Torre Informativa |
 | `NOMBRE_MANDO` | Tu nombre en la sala virtual | Mando |
 | `SEGUNDOS_TITULO` | Cuánto dura el titular (0 = todo el reel) | 0 |
-| `MODELO_GUIONISTA` | Modelo de Groq para Mandy | `llama-3.3-70b-versatile` |
+| `MODELO_GEMINI` | Modelo de Gemini para Mandy | `gemini-3.8-flash` |
 
 **Logo**: sube un PNG con fondo transparente al repositorio como `marca/logo.png` y Sonny lo pondrá arriba a la derecha.
 
@@ -114,6 +116,7 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 - **Una misión a la vez**, como en la sala de redacción.
 - **Privacidad**: el video se comparte por enlace solo mientras Lisa o Sonny lo procesan, y vuelve a ser privado al terminar o cancelar. La sala virtual solo muestra el código de la operación y el estado de cada agente; nunca titulares, transcripciones ni nombres de archivos. Los registros de GitHub son públicos, por eso los operadores nunca imprimen el contenido de una misión.
 - **Tiempos**: cada operador tarda uno o dos minutos en arrancar (prepara FFmpeg en la nube) antes de trabajar.
-- **Límites gratuitos**: Telegram deja a los bots descargar archivos de hasta 20 MB y enviar videos de hasta 50 MB (si el reel pesa más, Sonny lo recomprime). Groq tiene topes por minuto y por día; si aparece una pausa, Mandy espera sola. Las Actions son gratuitas en repositorios públicos.
+- **Límites gratuitos**: Telegram deja a los bots descargar archivos de hasta 20 MB y enviar videos de hasta 50 MB (si el reel pesa más, Sonny lo recomprime). Gemini gratuito tiene topes por minuto y por día (los ves en Google AI Studio); si aparece una pausa, la sala espera sola. Las Actions son gratuitas en repositorios públicos.
+- **Privacidad de Gemini gratuito**: en el plan gratuito, Google puede usar lo que envías para mejorar sus productos, y personas pueden revisarlo. No pases por la sala material confidencial de fuentes que no deba salir de la redacción.
 - **Revisa nombres y cifras en los subtítulos**: Whisper puede escuchar mal algunas palabras.
 - Mandy trabaja con lo que **se dice** en el video; no ve la imagen. Si quieres un momento solo visual, pídelo en *Pedir cambios* indicando el minuto.

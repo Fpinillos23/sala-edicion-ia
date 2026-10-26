@@ -23,6 +23,8 @@ jobs:
       SALA_CLAVE: ${{ secrets.SALA_CLAVE }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      MODELO_GEMINI: ${{ vars.MODELO_GEMINI }}
       MODELO_TRANSCRIPCION: ${{ vars.MODELO_TRANSCRIPCION }}
     steps:
       - uses: actions/checkout@v4
