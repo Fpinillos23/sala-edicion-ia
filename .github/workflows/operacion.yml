@@ -1,0 +1,48 @@
+name: Operación Bravo
+
+# Apps Script despierta este flujo con un "repository_dispatch" y solo envía el número de misión.
+# Los datos de la misión se piden al Apps Script con la clave secreta; nada sensible queda en los registros.
+on:
+  repository_dispatch:
+    types: [transcribir, editar]
+
+concurrency:
+  group: mision-${{ github.event.client_payload.mision_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  operar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MISION_ID: ${{ github.event.client_payload.mision_id }}
+      SALA_API: ${{ secrets.SALA_API }}
+      SALA_CLAVE: ${{ secrets.SALA_CLAVE }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MODELO_TRANSCRIPCION: ${{ vars.MODELO_TRANSCRIPCION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Preparar herramientas (FFmpeg y tipografías)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-liberation > /dev/null
+          pip install -q -r operador/requirements.txt
+
+      - name: Lisa Davis transcribe
+        if: github.event.action == 'transcribir'
+        working-directory: operador
+        run: python lisa.py "$MISION_ID"
+
+      - name: Sonny Quinn edita
+        if: github.event.action == 'editar'
+        working-directory: operador
+        run: python sonny.py "$MISION_ID"
