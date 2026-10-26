@@ -429,7 +429,8 @@ function iniciarMision_(chat, archivo) {
   guardarTrabajo_(m, {});
   if (!compartir_(m.video_id, true)) {
     m.estado = 'cancelada'; guardarMision_(m);
-    return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita el operador en GitHub). Revisa si tu cuenta de Google lo permite.');
+    return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita el operador en GitHub).\n<code>' +
+      esc_(prop_('ULTIMO_ERROR_COMPARTIR', 'sin detalle')) + '</code>');
   }
   salaEvento_('jason', 'trabajando', 'Material recibido. Abriendo ' + m.codigo + '.', { mision: resumenSala_(m, 1) });
   enviar_(chat, '🎖 <b>Jason Hayes</b>: material recibido. Abrimos la <b>' + esc_(m.codigo) + '</b>.\n' +
@@ -444,7 +445,31 @@ function compartir_(id, abrir) {
     DriveApp.getFileById(id).setSharing(abrir ? DriveApp.Access.ANYONE_WITH_LINK : DriveApp.Access.PRIVATE,
       abrir ? DriveApp.Permission.VIEW : DriveApp.Permission.NONE);
     return true;
-  } catch (e) { return !abrir; }
+  } catch (e) {
+    console.error('No se pudo cambiar el acceso del video: ' + (e.message || e));
+    P_().setProperty('ULTIMO_ERROR_COMPARTIR', String(e.message || e).slice(0, 300));
+    return !abrir;
+  }
+}
+
+/** Prueba: intenta compartir por enlace el video más reciente de "entrada" y explica qué pasa. */
+function probarCompartir() {
+  const it = carpeta_('entrada').getFiles();
+  let f = null;
+  while (it.hasNext()) { const x = it.next(); if (/^video\//.test(x.getMimeType()) && (!f || x.getDateCreated() > f.getDateCreated())) f = x; }
+  if (!f) return Logger.log('No hay videos en la carpeta entrada.');
+  let dueno = '?';
+  try { dueno = f.getOwner() ? f.getOwner().getEmail() : '(unidad compartida)'; } catch (e) { dueno = 'no disponible'; }
+  Logger.log('Video: ' + f.getName() + ' — dueño: ' + dueno + ' — tu cuenta: ' + Session.getEffectiveUser().getEmail());
+  Logger.log('Acceso actual: ' + f.getSharingAccess() + ' / ' + f.getSharingPermission());
+  try {
+    f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    Logger.log('Compartir por enlace: funciona ✅');
+    f.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+    Logger.log('Volver a privado: funciona ✅');
+  } catch (e) {
+    Logger.log('Compartir por enlace: ERROR — ' + (e.message || e));
+  }
 }
 
 function despachar_(tipo, m) {
