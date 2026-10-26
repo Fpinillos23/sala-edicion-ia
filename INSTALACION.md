@@ -94,11 +94,17 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 
 - **Videos de hasta 20 MB**: envíalos directo al bot.
 - **Videos más pesados**: súbelos a la carpeta **Sala de Edición IA › entrada** de tu Drive y escribe `/drive`, o pega el enlace de Drive en el chat.
-- **Jason siempre pregunta primero qué hacer** con el material. Puedes escribirlo en el mismo mensaje del video (pie de foto) o elegir un botón:
-  - 🎬 **Reel con lo que se dice**: entrevistas, declaraciones, ruedas de prensa.
-  - 🖼 **Quitar el audio y animar imágenes encima**: envía las fotos antes o después del video (también como álbum). Sonny quita todo el sonido y pone las imágenes, en el orden en que llegaron, en un recuadro flotante con borde blanco, repartidas a lo largo del video. Si en la instrucción pides un titular, sale arriba y el recuadro baja.
-  - 🔇 **Solo quitar el audio**.
-  - Si la instrucción no es clara, Jason pregunta en vez de adivinar. Si Lisa no encuentra voz en un video, te ofrece el modo visual.
+- **Jason siempre te pide la instrucción, y la instrucción es libre.** Respóndele con tus palabras, por escrito o con una **nota de voz** 🎙, o escríbela en el pie de foto del video. Ejemplos:
+  - *"Quítale la música y pon encima las fotos que te mandé."*
+  - *"Déjale la voz, quítale la música y ponle subtítulos."*
+  - *"Del segundo 10 al 40, en blanco y negro, al doble de rápido, con el titular Festival Vallenato."*
+  - *"Pon esta canción de fondo, suave, y un rótulo abajo que diga Fuente: Alcaldía."*
+  - *"Haz un reel de 45 segundos con lo que dice el alcalde"* (este va al flujo de Mandy, con preguntas y guion).
+- **Material extra**: envía fotos (sueltas o en álbum) y audios de música de fondo antes o después del video.
+- Jason convierte tu orden en un **plan de edición** y te lo muestra antes de tocar nada. Si falta algo, pregunta; si pides algo que la sala no sabe hacer, te lo dice. Para corregir, escríbele o mándale una nota de voz con el cambio.
+- **Lo que Sonny sabe hacer**: elegir partes del video, cambiar velocidad, formato (vertical, cuadrado, original), color (blanco y negro, cálido, frío, contraste, vivo, brillo), quitar todo el sonido o bajarle el volumen, separar la voz de la música, música de fondo, subtítulos, titulares, rótulos y textos, imágenes (recuadro flotante, pantalla completa o esquina, repartidas o en momentos exactos), fundidos y logo.
+- **Lo que todavía no sabe hacer**: unir varios videos, generar imágenes o voces, traducir, ni quitar objetos de la imagen.
+- **Separar la voz de la música** usa Demucs, un modelo abierto que corre en GitHub; la primera vez tarda varios minutos más en instalarse.
 - En el modo reel, responde las preguntas de Mandy. Si no sabes algo, `/saltar`: quedará como *vacío de información*, nunca se inventa.
 - Elige duración y formato, revisa el guion y pulsa **Aprobar y editar** o **Pedir cambios**.
 - Sonny te envía el reel al chat. El guion queda en **Sala de Edición IA › salida**.

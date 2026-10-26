@@ -139,7 +139,7 @@ function carpetas_() {
     P_().setProperty('CARPETA_ID', carpeta.getId());
   }
   const sub = {};
-  ['entrada', 'trabajo', 'salida', 'imagenes'].forEach(n => {
+  ['entrada', 'trabajo', 'salida', 'imagenes', 'audios'].forEach(n => {
     const key = 'CARPETA_' + n.toUpperCase();
     let f = null;
     try { f = prop_(key) ? DriveApp.getFolderById(prop_(key)) : null; } catch (e) { f = null; }
@@ -270,8 +270,11 @@ function telegram_(u) {
   if (/^\/cancelar/.test(texto)) return cancelar_(chat);
   if (/^\/drive/.test(texto)) return listarDrive_(chat);
 
+  if (msg.voice) return recibirNotaDeVoz_(chat, msg.voice);
   const foto = fotoDe_(msg);
   if (foto) return recibirImagen_(chat, msg, foto, texto);
+  const sonido = msg.audio || (msg.document && /^audio\//.test(msg.document.mime_type || '') ? msg.document : null);
+  if (sonido) return recibirMusica_(chat, sonido, texto);
 
   const doc = msg.document && /^video\//.test(msg.document.mime_type || '') ? msg.document : null;
   const archivo = msg.video || doc;
@@ -280,13 +283,20 @@ function telegram_(u) {
   const idDrive = idDrive_(texto);
   if (idDrive) return iniciarConDrive_(chat, idDrive, texto.replace(/https?:\/\/\S+/g, '').trim());
 
+  return textoLibre_(chat, texto);
+}
+
+/** Todo texto (o nota de voz ya transcrita) que no es un comando ni un archivo. */
+function textoLibre_(chat, texto) {
   const m = mision_();
-  if (m && m.estado === 'instruccion') return interpretarInstruccion_(chat, m, texto);
+  if (m && m.estado === 'instruccion') { agregarOrden_(m, texto); return planificar_(chat, m); }
   if (m && m.estado === 'imagenes') {
     if (/^(\/?listo|ya|ya est[aá]|son todas|eso es todo)\b/i.test(texto)) return imagenesListas_(chat, m);
-    return enviar_(chat, '🖼 <b>Jason Hayes</b>: estoy recibiendo imágenes (' + (m.imagenes || []).length + ' hasta ahora). ' +
-      'Envía las que falten o pulsa el botón cuando termines.', [[{ text: '✅ Ya envié todas', callback_data: 'img:listo' }]]);
+    agregarOrden_(m, texto);
+    return enviar_(chat, '🖼 <b>Jason Hayes</b>: anotado. Estoy recibiendo imágenes (' + (m.imagenes || []).length + ' hasta ahora). ' +
+      'Envía las que falten y pulsa el botón cuando termines.', [[{ text: '✅ Ya envié todas', callback_data: 'img:listo' }]]);
   }
+  if (m && m.estado === 'revision' && m.modo === 'plan') { agregarOrden_(m, 'Cambio pedido: ' + texto); return planificar_(chat, m); }
   if (m && m.estado === 'preguntando') return responder_(chat, m, texto);
   if (m && m.estado === 'ajuste') return ajustar_(chat, m, texto);
   if (m && m.estado === 'duracion' && /^\d{1,3}$/.test(texto)) return fijarDuracion_(chat, m, parseInt(texto, 10));
@@ -309,19 +319,19 @@ function boton_(q) {
   const m = mision_();
   if (!m) return enviar_(chat, 'No hay ninguna misión activa.');
   if (d === 'cancelar') return cancelar_(chat);
-  if (d.indexOf('modo:') === 0 && m.estado === 'instruccion') return elegirModo_(chat, m, d.slice(5));
+  if (d === 'modo:reel' && m.estado === 'instruccion') return elegirReel_(chat, m);
   if (d === 'img:listo' && m.estado === 'imagenes') return imagenesListas_(chat, m);
   if (d.indexOf('dur:') === 0 && m.estado === 'duracion') return fijarDuracion_(chat, m, parseInt(d.slice(4), 10));
   if (d.indexOf('fmt:') === 0 && m.estado === 'formato') {
     m.formato = (FORMATOS[d.slice(4)] || FORMATOS['1'])[0];
     m.ajustes = '';
     guardarMision_(m);
-    return m.modo === 'visual' ? planVisual_(chat, m) : escribirGuion_(chat, m);
+    return escribirGuion_(chat, m);
   }
   if ((d === 'aprobar' || d === 'aprobar_maestra') && m.estado === 'revision') return aprobar_(chat, m, d === 'aprobar_maestra');
-  if (d === 'cambiar' && m.estado === 'revision' && m.modo === 'visual') {
-    m.estado = 'instruccion'; guardarMision_(m);
-    return preguntarInstruccion_(m, '✏️ <b>Jason Hayes</b>: entendido. Dime de nuevo qué hacemos con este material.');
+  if (d === 'cambiar' && m.estado === 'revision' && m.modo === 'plan') {
+    return enviar_(chat, '✏️ <b>Jason Hayes</b>: dime qué cambio (por escrito o con una nota de voz). Por ejemplo: ' +
+      '<i>"que las fotos salgan en pantalla completa"</i>, <i>"déjale la voz pero quítale la música"</i>, <i>"córtalo a 30 segundos"</i>.');
   }
   if (d === 'cambiar' && m.estado === 'revision') {
     m.estado = 'ajuste'; guardarMision_(m);
@@ -329,8 +339,8 @@ function boton_(q) {
     return enviar_(chat, '✏️ <b>Mandy Ellis</b>: dime qué cambio quieres (por ejemplo: "empieza con la cifra", "más corto", "quita el segundo corte").');
   }
   if (d === 'otro' && m.estado === 'lista') {
-    if (m.modo === 'visual') {
-      m.estado = 'instruccion'; guardarMision_(m);
+    if (m.modo !== 'reel') {
+      m.instruccion = ''; guardarMision_(m);
       return preguntarInstruccion_(m, '🎖 <b>Jason Hayes</b>: otra versión con el mismo material. ¿Qué hacemos esta vez?');
     }
     m.ajustes = ''; m.estado = 'duracion'; guardarMision_(m);
@@ -358,10 +368,11 @@ function bienvenida_(chat) {
     '',
     '<b>Cómo trabajamos:</b>',
     '1. Me envías un video (hasta 20 MB). Si pesa más, súbelo a la carpeta <b>entrada</b> de Drive y escribe /drive.',
-    '2. <b>Te pregunto qué hacemos con él</b>. Puedes escribirlo en el mismo mensaje del video (como pie de foto) o elegir:',
-    '   🎬 <b>Reel con lo que se dice</b>: Lisa transcribe, Mandy te pregunta y escribe el guion con la guía de cortes.',
-    '   🖼 <b>Quitar el audio y animar imágenes encima</b>: me envías las fotos (antes o después del video) y Sonny las pone en un recuadro flotante, repartidas a lo largo del video.',
-    '   🔇 <b>Solo quitar el audio</b>.',
+    '2. <b>Te pregunto qué hacemos con él</b>. Respóndeme con tus palabras, por escrito o con una nota de voz 🎙. También puedes darme la orden en el pie de foto del video.',
+    '   Ejemplos: <i>"quítale la música y pon encima las fotos"</i>, <i>"déjale la voz, quita la música y ponle subtítulos"</i>, ' +
+    '<i>"del segundo 10 al 40, en blanco y negro, con el titular Festival Vallenato"</i>, <i>"un reel de 45 segundos con lo que dice el alcalde"</i>.',
+    '   🖼 Fotos y 🎵 música de fondo: envíamelas antes o después del video.',
+    '   Te muestro el plan de edición antes de tocar nada. Si algo no lo sé hacer, te lo digo.',
     '3. Tú apruebas o pides cambios.',
     '4. <b>Sonny Quinn</b> edita y te entrega el video aquí mismo.',
     '',
@@ -449,6 +460,7 @@ function guardarImagen_(chat, archivo, grupo, texto) {
   let total;
   if (activa) {
     m.imagenes = (m.imagenes || []).concat([archivo.getId()]);
+    if (texto) agregarOrden_(m, texto);
     guardarMision_(m);
     total = m.imagenes.length;
   } else {
@@ -466,11 +478,56 @@ function guardarImagen_(chat, archivo, grupo, texto) {
     return enviar_(chat, '🖼 <b>Jason Hayes</b>: ' + (grupo ? 'recibo el álbum' : 'imagen guardada') + ' (' + total +
       ' en espera). Ahora envíame el <b>video</b> y te pregunto qué hacemos con todo.');
   }
-  if (m.estado === 'imagenes' || m.estado === 'instruccion') {
+  if (m.estado === 'imagenes' || m.estado === 'instruccion' || m.estado === 'revision' && m.modo === 'plan') {
     return enviar_(chat, '🖼 <b>Jason Hayes</b>: ' + (grupo ? 'recibo el álbum' : 'imagen recibida') + ' (' + total +
       ' en total, en el orden en que llegan). ¿Envías más?', [[{ text: '✅ Ya envié todas', callback_data: 'img:listo' }]]);
   }
-  enviar_(chat, '🖼 <b>Jason Hayes</b>: guardé la imagen en la misión (' + total + '). La usaremos si eliges el modo visual.');
+  enviar_(chat, '🖼 <b>Jason Hayes</b>: guardé la imagen en la misión (' + total + ').');
+}
+
+/** Música o audio de fondo enviado como archivo (no nota de voz). */
+function recibirMusica_(chat, sonido, texto) {
+  if ((sonido.file_size || 0) > LIMITE_TELEGRAM) return enviar_(chat, '📦 <b>Jason Hayes</b>: ese audio pasa de 20 MB.');
+  const f = tg_('getFile', { file_id: sonido.file_id });
+  if (!f.ok) return enviar_(chat, '⚠️ No pude recibir ese audio de Telegram.');
+  const blob = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + prop_('TELEGRAM_TOKEN') + '/' + f.result.file_path).getBlob();
+  const nombre = sonido.file_name || ('audio_' + Utilities.formatDate(new Date(), 'America/Bogota', 'yyyyMMdd_HHmmss') + '.mp3');
+  const id = carpeta_('audios').createFile(blob.setName(nombre)).getId();
+  const m = mision_();
+  if (m && LIBRES.indexOf(m.estado) < 0 && m.estado !== 'error') {
+    m.musica = id; if (texto) agregarOrden_(m, texto); guardarMision_(m);
+    if (texto && (m.estado === 'instruccion' || m.estado === 'revision' && m.modo === 'plan')) return planificar_(chat, m);
+    return enviar_(chat, '🎵 <b>Jason Hayes</b>: audio de fondo recibido para la misión. Dime cómo usarlo (por ejemplo, <i>"ponla de fondo, suave"</i>).');
+  }
+  P_().setProperty('MUSICA_PENDIENTE', id);
+  if (texto) P_().setProperty('INSTRUCCION_PENDIENTE', texto.slice(0, 800));
+  enviar_(chat, '🎵 <b>Jason Hayes</b>: audio de fondo guardado. Ahora envíame el <b>video</b>.');
+}
+
+/** Las notas de voz son órdenes: Gemini las transcribe y se tratan como texto. */
+function recibirNotaDeVoz_(chat, voz) {
+  if (!prop_('GEMINI_API_KEY')) return enviar_(chat, '🎙 <b>Jason Hayes</b>: para entender notas de voz necesito la clave de Gemini. Por ahora, escríbeme la instrucción.');
+  if ((voz.file_size || 0) > LIMITE_TELEGRAM) return enviar_(chat, '🎙 Esa nota de voz es muy larga. ¿Me la escribes?');
+  let texto = '';
+  try {
+    const f = tg_('getFile', { file_id: voz.file_id });
+    const bytes = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + prop_('TELEGRAM_TOKEN') + '/' + f.result.file_path).getBlob().getBytes();
+    tg_('sendChatAction', { chat_id: chat, action: 'typing' });
+    const r = gemini_('Transcribes notas de voz en español de Colombia, palabra por palabra, sin resumir ni agregar nada.', [
+      { inline_data: { mime_type: voz.mime_type || 'audio/ogg', data: Utilities.base64Encode(bytes) } },
+      { text: 'Transcribe esta nota de voz. Devuelve JSON: {"texto": "lo que dice"}' }]);
+    texto = String((r && r.texto) || '').trim();
+  } catch (e) {
+    console.error('Nota de voz: ' + (e.message || e));
+  }
+  if (!texto) return enviar_(chat, '🎙 <b>Jason Hayes</b>: no logré entender la nota de voz. ¿Me la repites o me la escribes?');
+  enviar_(chat, '🎙 Entendí: <i>«' + esc_(texto.slice(0, 600)) + '»</i>');
+  const m = mision_();
+  if (!m || LIBRES.indexOf(m.estado) >= 0 || m.estado === 'error') {
+    P_().setProperty('INSTRUCCION_PENDIENTE', texto.slice(0, 800));
+    return enviar_(chat, '🎖 <b>Jason Hayes</b>: anotada la instrucción. Ahora envíame el <b>video</b>.');
+  }
+  textoLibre_(chat, texto);
 }
 
 function pendientes_() { try { return JSON.parse(prop_('IMAGENES_PENDIENTES', '[]')) || []; } catch (e) { return []; } }
@@ -511,135 +568,248 @@ function iniciarMision_(chat, archivo, instruccion, duracionVideo) {
     id: Utilities.formatDate(new Date(), 'America/Bogota', 'yyMMddHHmmss'),
     codigo: 'Operación ' + NOMBRES_OPERACION[(n - 1) % NOMBRES_OPERACION.length] + '-' + ('0' + n).slice(-2),
     estado: 'instruccion', chat: chat, video_id: archivo.getId(), nombre: archivo.getName(),
-    duracion_video: Number(duracionVideo) || 0, imagenes: pendientes_(), modo: '', audio: 'silencio', instruccion: '',
+    duracion_video: Number(duracionVideo) || 0, imagenes: pendientes_(), musica: prop_('MUSICA_PENDIENTE', ''), modo: '', audio: 'silencio', instruccion: '',
     preguntas: [], respuestas: [], idx: 0, duracion: 60, formato: 'vertical', ajustes: '', reels: 0, creada: Date.now(),
   };
   const pendiente = prop_('INSTRUCCION_PENDIENTE', '');
   P_().deleteProperty('IMAGENES_PENDIENTES');
   P_().deleteProperty('INSTRUCCION_PENDIENTE');
+  P_().deleteProperty('MUSICA_PENDIENTE');
   guardarMision_(m);
   guardarTrabajo_(m, {});
   salaEvento_('jason', 'trabajando', 'Material recibido. Esperando la orden del mando.', { mision: resumenSala_(m, 1) });
   const orden = [String(instruccion || '').trim(), pendiente].filter(Boolean).join('\n');
   if (orden) {
     enviar_(chat, '🎖 <b>Jason Hayes</b>: material recibido. Abrimos la <b>' + esc_(m.codigo) + '</b>. Reviso tu instrucción...');
-    return interpretarInstruccion_(chat, m, orden);
+    agregarOrden_(m, orden);
+    return planificar_(chat, m);
   }
   preguntarInstruccion_(m, '🎖 <b>Jason Hayes</b>: material recibido. Abrimos la <b>' + esc_(m.codigo) + '</b>.\n' +
     'Antes de mover al equipo, dime: <b>¿qué hacemos con este video?</b>');
 }
 
-/** Jason no mueve al equipo hasta tener la orden del mando. */
+/** Jason no mueve al equipo hasta tener la orden del mando. La orden es libre: texto o nota de voz. */
 function preguntarInstruccion_(m, encabezado) {
+  m.estado = 'instruccion'; guardarMision_(m);
   const n = (m.imagenes || []).length;
-  enviar_(m.chat, encabezado + (n ? '\n🖼 Tengo <b>' + n + '</b> imagen' + (n > 1 ? 'es' : '') + ' tuya' + (n > 1 ? 's' : '') + ' para esta misión.' : '') +
-    '\n\nElige una opción o escríbeme la instrucción con tus palabras (por ejemplo: <i>"quítale la música y pon encima las fotos que te mandé"</i>).', [
-    [{ text: '🎬 Reel con lo que se dice en el video', callback_data: 'modo:reel' }],
-    [{ text: '🖼 Quitar el audio y animar imágenes encima', callback_data: 'modo:visual' }],
-    [{ text: '🔇 Solo quitar el audio', callback_data: 'modo:mudo' }],
-    [{ text: '❌ Cancelar', callback_data: 'cancelar' }],
-  ]);
+  const extras = [];
+  if (n) extras.push('🖼 ' + n + ' imagen' + (n > 1 ? 'es' : ''));
+  if (m.musica) extras.push('🎵 un audio de fondo');
+  enviar_(m.chat, encabezado + (extras.length ? '\n📎 Tengo además: ' + extras.join(' y ') + '.' : '') +
+    '\n\nDime con tus palabras qué hacemos, por escrito o con una <b>nota de voz</b> 🎙. Por ejemplo:\n' +
+    '• <i>"Quítale la música y pon encima las fotos que te mandé"</i>\n' +
+    '• <i>"Déjale la voz, quítale la música y ponle subtítulos"</i>\n' +
+    '• <i>"Del segundo 10 al 40, en blanco y negro, con el titular Festival Vallenato"</i>\n' +
+    '• <i>"Un reel de 45 segundos con lo que dice el alcalde"</i>\n' +
+    'Si vas a usar fotos o música, envíamelas cuando quieras.',
+    [[{ text: '❌ Cancelar', callback_data: 'cancelar' }]]);
 }
 
-/** Entiende la instrucción escrita. Si no queda clara, pregunta en vez de adivinar. */
-function interpretarInstruccion_(chat, m, texto) {
-  if (!texto) return preguntarInstruccion_(m, '🎖 <b>Jason Hayes</b>: ¿qué hacemos con este video?');
-  m.instruccion = String(texto).slice(0, 800);
+function agregarOrden_(m, texto) {
+  texto = String(texto || '').trim();
+  if (!texto) return;
+  m.instruccion = ((m.instruccion ? m.instruccion + '\n' : '') + texto).slice(-3000);
   guardarMision_(m);
+}
+
+const CAPACIDADES_PLAN =
+  'La sala ejecuta un PLAN de edición sobre UN video. Puede hacer exactamente esto:\n' +
+  '- formato: "vertical" (9:16 con fondo desenfocado), "vertical_recorte" (9:16 recortando el centro), "cuadrado" (1:1), "original".\n' +
+  '- tramos: partes del video a conservar, en el orden en que deben salir [{"inicio": s, "fin": s}]. Vacío = video completo.\n' +
+  '- velocidad: 0.25 a 4 (1 = normal; 2 = doble de rápido; 0.5 = cámara lenta).\n' +
+  '- color: {"filtro": "ninguno|blanco_negro|calido|frio|contraste|vivo", "brillo": -0.3 a 0.3}.\n' +
+  '- audio: {"modo": "original|silencio|solo_voz", "volumen": 0 a 3, "musica": true/false, "volumen_musica": 0 a 2}. ' +
+  '"silencio" quita TODO el sonido. "solo_voz" separa la voz y quita la música de fondo (tarda más). "musica" usa el audio de fondo que envió el periodista (solo si existe).\n' +
+  '- subtitulos: true/false (solo si hay transcripción con voz).\n' +
+  '- textos en pantalla: [{"texto": "", "inicio": s, "fin": s, "posicion": "arriba|centro|abajo", "estilo": "titular|rotulo|simple"}]. ' +
+  'titular = recuadro de color de marca; rotulo = banda oscura (fuentes, nombres, cargos); simple = letra blanca con borde.\n' +
+  '- imagenes: {"usar": [números de imagen en orden], "estilo": "recuadro_flotante|pantalla_completa|esquina", ' +
+  '"posicion": "arriba|centro|abajo|izquierda|derecha" o "", "tamano": 0.15 a 1 o 0 (automático), ' +
+  '"tiempos": [{"imagen": n, "inicio": s, "fin": s}] o [] para repartirlas parejo a lo largo del video}. Todas entran y salen con fundido.\n' +
+  '- fundido: {"entrada": segundos, "salida": segundos} (0 a 3).\n' +
+  '- logo: true/false (logo del medio arriba a la derecha, si existe).\n' +
+  'Los tiempos de textos e imágenes van en la línea de tiempo del video FINAL (después de cortes y cambio de velocidad).\n' +
+  'NO puede: unir varios videos, generar imágenes o voces nuevas, traducir, narrar con voz artificial, quitar objetos o personas, ' +
+  'efectos de transición entre tramos distintos del corte directo, ni ningún efecto que no esté en esta lista.';
+
+/** Convierte la instrucción libre del mando en un plan de edición, o pregunta lo que falte. */
+function planificar_(chat, m) {
+  const t = leerTrabajo_(m);
+  const n = (m.imagenes || []).length;
+  let transcripcion;
+  if (t.segmentos && t.segmentos.length) transcripcion = transcripcionTexto_(t.segmentos).slice(0, 12000);
+  else if (t.transcrito) transcripcion = '(Lisa ya revisó el video: NO tiene voz.)';
+  else transcripcion = '(No disponible todavía. Si la instrucción depende de lo que se DICE en el video, responde tipo "necesito_transcripcion".)';
+  salaEvento_('jason', 'trabajando', 'Traduciendo la orden del mando a un plan.', { mision: resumenSala_(m, 4) });
+  tg_('sendChatAction', { chat_id: chat, action: 'typing' });
   let r = null;
   try {
-    tg_('sendChatAction', { chat_id: chat, action: 'typing' });
-    r = ia_('Eres el coordinador de una sala de edición de video. El periodista envió un video' +
-      ((m.imagenes || []).length ? ' y ' + m.imagenes.length + ' imágenes' : '') + ' con esta instrucción:\n"' + m.instruccion + '"\n\n' +
-      'La sala sabe hacer exactamente dos trabajos:\n' +
-      '- "reel": transcribir lo que se DICE en el video (entrevista, declaración, rueda de prensa) y armar un reel corto con cortes y subtítulos.\n' +
-      '- "visual": usar el video completo SIN su audio (o con el audio original si lo pide) y poner encima las imágenes del periodista, animadas en un recuadro flotante. ' +
-      'También sirve para "solo quitar el audio o la música" (sin imágenes).\n\n' +
-      'Clasifica la instrucción. Si no corresponde con claridad a ninguno de los dos, o pide algo que la sala no sabe hacer, usa "no_claro" y escribe en "duda" una pregunta corta para aclararlo.\n' +
-      'Devuelve este JSON:\n{"modo": "reel" | "visual" | "no_claro", "audio": "silencio" | "original", "titulo": "titular que el periodista pidió poner en pantalla, o cadena vacía", "duda": "pregunta si no está claro"}');
+    r = iaJason_('Tu trabajo es convertir la instrucción del periodista en un plan de edición ejecutable.\n\n' +
+      CAPACIDADES_PLAN + '\n\nMATERIAL:\n' +
+      '- Video de ' + (m.duracion_video ? m.duracion_video + ' segundos' : 'duración desconocida') + '.\n' +
+      '- Imágenes del periodista: ' + n + (n ? ' (numeradas del 1 al ' + n + ' en el orden en que llegaron)' : '') + '.\n' +
+      '- Audio de fondo enviado por el periodista: ' + (m.musica ? 'sí' : 'no') + '.\n' +
+      '- Transcripción del video:\n' + transcripcion + '\n' +
+      (t.plan ? '\nPLAN ANTERIOR (el periodista pide cambios sobre este):\n' + JSON.stringify(t.plan) + '\n' : '') +
+      '\nINSTRUCCIONES DEL PERIODISTA (en orden; las últimas mandan):\n' + m.instruccion + '\n\n' +
+      'Reglas:\n' +
+      '1. Haz lo que pide, ni más ni menos. Lo que no pidió queda con valores neutros (formato "vertical" si no dice, audio original, sin color, sin textos).\n' +
+      '2. Nunca inventes textos para la pantalla: usa solo palabras que el periodista dio, o frases literales de la transcripción si él pidió sacarlas de ahí.\n' +
+      '3. Si algo esencial es ambiguo, responde tipo "preguntar" con máximo 3 preguntas cortas. No preguntes lo que tiene un valor razonable por defecto.\n' +
+      '4. Si pide imágenes y no hay ninguna, tipo "necesito_imagenes". Si depende de lo que se dice y no hay transcripción, tipo "necesito_transcripcion".\n' +
+      '5. Si pide armar un REEL periodístico eligiendo los mejores fragmentos de lo que se dice (entrevista, declaración) y no da los tiempos, tipo "reel": ' +
+      'lo hará Mandy con su guion. Si da tiempos o pide algo concreto, es tipo "plan".\n' +
+      '6. Lo que la sala no sabe hacer va en "no_se_puede", explicado en una frase; igual planea el resto si tiene sentido.\n\n' +
+      'Devuelve este JSON:\n{"tipo": "plan" | "reel" | "preguntar" | "necesito_imagenes" | "necesito_transcripcion", ' +
+      '"entendido": "una o dos frases, en segunda persona, de lo que vas a hacer", "preguntas": [], "no_se_puede": [], ' +
+      '"plan": {"formato": "", "tramos": [], "velocidad": 1, "color": {}, "audio": {}, "subtitulos": false, "textos": [], "imagenes": {}, "fundido": {}, "logo": true}}');
   } catch (e) {
-    console.error('Interpretar instrucción: ' + (e.message || e));
+    console.error('Planificar: ' + (e.message || e));
+    m.estado = 'instruccion'; guardarMision_(m);
+    return enviar_(chat, '⚠️ <b>Jason Hayes</b>: no pude consultar a Gemini ahora (' + esc_(String(e.message || e)).slice(0, 150) + '). ' +
+      'Repíteme la instrucción en un minuto.', [[{ text: '❌ Cancelar', callback_data: 'cancelar' }]]);
   }
-  const modo = r && r.modo;
-  if (modo === 'reel' || modo === 'visual') {
-    if (modo === 'visual') {
-      m.audio = r.audio === 'original' ? 'original' : 'silencio';
-      m.titulo = String(r.titulo || '').slice(0, 120);
-      guardarMision_(m);
-    }
-    return elegirModo_(chat, m, modo);
-  }
-  const duda = r && r.duda ? esc_(r.duda) : 'No estoy seguro de qué quieres hacer con el material.';
-  preguntarInstruccion_(m, '🤔 <b>Jason Hayes</b>: ' + duda);
-}
+  r = r || {};
+  const tipo = r.tipo;
+  const noSe = (r.no_se_puede || []).map(String).filter(Boolean);
+  const avisoNo = noSe.length ? '\n\n🚫 <b>Esto no lo sé hacer</b>:\n' + noSe.map(x => '• ' + esc_(x)).join('\n') : '';
 
-function elegirModo_(chat, m, modo) {
-  if (modo === 'reel') {
-    m.modo = 'reel'; guardarMision_(m);
-    const t = leerTrabajo_(m);
-    if (t.segmentos && t.segmentos.length) return iniciarInterrogatorio_(m, t.segmentos); // ya estaba transcrito
+  if (tipo === 'reel') return elegirReel_(chat, m);
+  if (tipo === 'necesito_imagenes' && !n) {
+    m.estado = 'imagenes'; guardarMision_(m);
+    return enviar_(chat, '🖼 <b>Jason Hayes</b>: ' + esc_(r.entendido || 'entendido.') + '\nEnvíame las <b>imágenes</b> (fotos o archivos) en el orden en que quieres que salgan. ' +
+      'Cuando termines pulsa <b>✅ Ya envié todas</b>.' + avisoNo);
+  }
+  if (tipo === 'necesito_transcripcion' && !t.transcrito) {
     if (!compartir_(m.video_id, true)) {
-      m.estado = 'cancelada'; guardarMision_(m);
-      return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita el operador en GitHub).\n<code>' +
+      return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita Lisa en GitHub).\n<code>' +
         esc_(prop_('ULTIMO_ERROR_COMPARTIR', 'sin detalle')) + '</code>');
     }
-    m.estado = 'transcribiendo'; guardarMision_(m);
-    enviar_(chat, '🎖 <b>Jason Hayes</b>: entendido, <b>reel con lo que se dice</b>.\n' +
-      '🎧 <b>Lisa Davis</b> ya lo está transcribiendo; tarda unos minutos. Te aviso cuando Mandy tenga preguntas.');
+    m.flujo = 'plan'; m.estado = 'transcribiendo'; guardarMision_(m);
+    enviar_(chat, '🎧 <b>Jason Hayes</b>: ' + esc_(r.entendido || 'entendido.') + '\nPara eso necesito saber qué se dice: <b>Lisa Davis</b> lo transcribe y luego te muestro el plan.');
     despachar_('transcribir', m);
-    return salaEvento_('lisa', 'trabajando', 'En camino al material.', { mision: resumenSala_(m, 2) });
+    return salaEvento_('lisa', 'trabajando', 'Transcribiendo para el plan.', { mision: resumenSala_(m, 2) });
   }
-  m.modo = 'visual';
-  if (modo === 'mudo') {
-    m.imagenes = []; m.audio = 'silencio'; guardarMision_(m);
-    enviar_(chat, '🔇 <b>Jason Hayes</b>: entendido, <b>solo quitar el audio</b> del video completo.');
-    return imagenesListas_(chat, m);
+  const preguntas = (r.preguntas || []).map(String).filter(Boolean).slice(0, 3);
+  if (tipo === 'preguntar' || !r.plan) {
+    m.estado = 'instruccion'; guardarMision_(m);
+    const qs = preguntas.length ? preguntas : ['¿Me cuentas con un poco más de detalle qué quieres que haga con el video?'];
+    return enviar_(chat, '🤔 <b>Jason Hayes</b>: ' + (r.entendido ? esc_(r.entendido) + '\n' : '') + 'Antes de editar necesito saber:\n' +
+      qs.map((q, i) => (i + 1) + '. ' + esc_(q)).join('\n') + avisoNo + '\n\nRespóndeme en un solo mensaje (texto o voz).',
+      [[{ text: '❌ Cancelar', callback_data: 'cancelar' }]]);
   }
-  m.estado = 'imagenes'; guardarMision_(m);
-  const n = (m.imagenes || []).length;
-  const audio = m.audio === 'original' ? 'conservando el audio original' : 'en <b>silencio total</b>';
-  if (n) {
-    return enviar_(chat, '🖼 <b>Jason Hayes</b>: entendido. Video completo ' + audio + ', con tus imágenes en un recuadro flotante, repartidas a lo largo del video.\n' +
-      'Tengo <b>' + n + '</b> imagen' + (n > 1 ? 'es' : '') + '. ¿Envías más o trabajamos con ' + (n > 1 ? 'estas' : 'esta') + '?',
-      [[{ text: '✅ Usar ' + (n > 1 ? 'estas ' + n : 'esta'), callback_data: 'img:listo' }]]);
-  }
-  enviar_(chat, '🖼 <b>Jason Hayes</b>: entendido. Video completo ' + audio + ', con imágenes en un recuadro flotante, repartidas a lo largo del video.\n' +
-    'Envíame ahora las <b>imágenes</b> (fotos o archivos), en el orden en que quieres que salgan. Cuando termines pulsa <b>✅ Ya envié todas</b>.');
-}
 
-function imagenesListas_(chat, m) {
-  m.estado = 'formato'; guardarMision_(m);
-  salaEvento_('jason', 'espera', 'Esperando el formato del mando.', { mision: resumenSala_(m, 4) });
-  enviar_(chat, '📐 <b>Jason Hayes</b>: ' + ((m.imagenes || []).length ? m.imagenes.length + ' imágenes listas. ' : '') + '¿En qué formato lo entregamos?',
-    Object.keys(FORMATOS).map(k => [{ text: FORMATOS[k][1], callback_data: 'fmt:' + k }]));
-}
-
-/** Resumen del trabajo visual para que el mando lo apruebe antes de que Sonny edite. */
-function planVisual_(chat, m) {
-  m.estado = 'revision'; guardarMision_(m);
-  const n = (m.imagenes || []).length, d = m.duracion_video || 0;
-  const formato = (Object.keys(FORMATOS).map(k => FORMATOS[k]).filter(f => f[0] === m.formato)[0] || FORMATOS['1'])[1];
-  const l = ['🎬 <b>Plan de Sonny Quinn</b>', '',
-    '• Video: completo' + (d ? ' (' + mmss_(d) + ')' : '') + ', sin cortes.',
-    '• Audio: ' + (m.audio === 'original' ? 'el original del video.' : '<b>silencio total</b> (se quita la música y todo el sonido).'),
-    n ? '• Imágenes: <b>' + n + '</b> en un recuadro flotante con borde blanco; entran con un fundido, se acercan despacio y salen con otro fundido' +
-        (d ? ', una cada ~' + Math.round(d / n) + ' s.' : ', repartidas a lo largo del video.') : '• Imágenes: ninguna.',
-    '• Formato: ' + esc_(formato) + '.'];
-  if (m.titulo) l.push('• Titular en pantalla: <b>' + esc_(m.titulo) + '</b>');
-  if (m.instruccion) l.push('', '📝 Tu instrucción: <i>' + esc_(m.instruccion) + '</i>');
-  const largo = d > 60;
-  if (largo) l.push('', '💾 Como pasa de 1 minuto, Sonny guardará también la copia maestra en Drive.');
+  // Plan listo: se guarda y se muestra para aprobación.
+  t.plan = r.plan;
+  guardarTrabajo_(m, t);
+  m.modo = 'plan'; m.estado = 'revision';
+  const titular = (r.plan.textos || []).filter(x => x && x.estilo === 'titular')[0];
+  m.titulo = titular ? String(titular.texto).slice(0, 120) : '';
+  guardarMision_(m);
+  const largo = duracionSalida_(m, t) > 60;
   salaEvento_('mando', 'trabajando', 'Revisando el plan de edición.', { mision: resumenSala_(m, 5) });
   const aprobar = largo
     ? [[{ text: '✅ Aprobar y editar (+ copia maestra en Drive)', callback_data: 'aprobar' }]]
     : [[{ text: '✅ Aprobar y editar', callback_data: 'aprobar' }], [{ text: '💾 Aprobar + copia maestra en Drive', callback_data: 'aprobar_maestra' }]];
-  enviar_(chat, l.join('\n'), aprobar.concat([[{ text: '✏️ Cambiar la instrucción', callback_data: 'cambiar' }, { text: '❌ Cancelar', callback_data: 'cancelar' }]]));
+  enviar_(chat, '🎬 <b>Plan de edición</b>\n' + (r.entendido ? '<i>' + esc_(r.entendido) + '</i>\n' : '') + '\n' + describirPlan_(r.plan, m, t) + avisoNo +
+    (largo ? '\n\n💾 Como pasa de 1 minuto, Sonny guardará también la copia maestra en Drive.' : '') +
+    '\n\n¿Lo apruebas? Si quieres cambiar algo, escríbemelo o mándame una nota de voz.',
+    aprobar.concat([[{ text: '✏️ Cambiar algo', callback_data: 'cambiar' }, { text: '❌ Cancelar', callback_data: 'cancelar' }]]));
 }
 
-/** Abre o cierra el acceso por enlace del video y, en modo visual, de sus imágenes. */
+/** Jason piensa con su propio rol (Mandy tiene el suyo). */
+function iaJason_(usuario) {
+  const sistema = 'Eres JASON HAYES, coordinador de la sala de edición de video de ' + prop_('NOMBRE_MEDIO', 'Torre Informativa') +
+    ', un medio periodístico. Conviertes las instrucciones del periodista en planes de edición ejecutables. ' +
+    'Escribes en español de Colombia. Responde siempre en JSON válido, sin texto fuera del JSON.';
+  return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario) : groq_(sistema, usuario);
+}
+
+/** Texto del plan escrito por el código (no por la IA), para que lo que apruebas sea exactamente lo que Sonny hará. */
+function describirPlan_(p, m, t) {
+  const l = [];
+  const formatos = { vertical: 'vertical 9:16 con fondo desenfocado', vertical_recorte: 'vertical 9:16 recortado al centro', cuadrado: 'cuadrado 1:1', original: 'formato original' };
+  l.push('• Formato: ' + (formatos[p.formato] || formatos.vertical) + '.');
+  const tramos = (p.tramos || []).filter(x => x && Number(x.fin) > Number(x.inicio));
+  if (tramos.length) l.push('• Partes del video: ' + tramos.map(x => mmss_(x.inicio) + '→' + mmss_(x.fin)).join(', ') + '.');
+  else l.push('• Video completo' + (m.duracion_video ? ' (' + mmss_(m.duracion_video) + ')' : '') + ', sin cortes.');
+  const v = Number(p.velocidad) || 1;
+  if (v !== 1) l.push('• Velocidad: ' + (v > 1 ? v + '× más rápido' : 'cámara lenta (' + v + '×)') + '.');
+  const c = p.color || {};
+  const colores = { blanco_negro: 'blanco y negro', calido: 'tono cálido', frio: 'tono frío', contraste: 'más contraste', vivo: 'colores más vivos' };
+  if (colores[c.filtro] || Number(c.brillo)) l.push('• Color: ' + [colores[c.filtro], Number(c.brillo) ? (c.brillo > 0 ? 'más brillo' : 'menos brillo') : ''].filter(Boolean).join(', ') + '.');
+  const a = p.audio || {};
+  const audios = { silencio: '<b>silencio total</b> (se quita todo el sonido)', solo_voz: 'solo la voz (se separa y se quita la música; tarda unos minutos más)', original: 'el original' };
+  let au = audios[a.modo] || audios.original;
+  if (a.modo !== 'silencio' && a.volumen !== undefined && Number(a.volumen) !== 1) au += ' al ' + Math.round(Number(a.volumen) * 100) + ' %';
+  if (a.musica && m.musica) au += ' + tu audio de fondo' + (a.volumen_musica !== undefined ? ' al ' + Math.round(Number(a.volumen_musica) * 100) + ' %' : '');
+  l.push('• Audio: ' + au + '.');
+  if (p.subtitulos) l.push('• Subtítulos con lo que se dice' + ((t.segmentos || []).length ? '' : ' (⚠️ no hay transcripción con voz: no saldrán)') + '.');
+  (p.textos || []).filter(x => x && x.texto).forEach(x => {
+    const estilos = { titular: 'titular', rotulo: 'rótulo', simple: 'texto' };
+    l.push('• ' + (estilos[x.estilo] || 'Texto').replace(/^./, s => s.toUpperCase()) + ' ' + (x.posicion || 'arriba') + ': «' + esc_(x.texto) + '»' +
+      (x.inicio !== undefined && x.fin !== undefined ? ' (' + mmss_(x.inicio) + '→' + mmss_(x.fin) + ')' : ''));
+  });
+  const im = p.imagenes || {};
+  const n = (m.imagenes || []).length;
+  if (n) {
+    const usar = (im.usar && im.usar.length ? im.usar : Array.from({ length: n }, (_, i) => i + 1)).filter(i => i >= 1 && i <= n);
+    const estilos = { recuadro_flotante: 'en un recuadro flotante con borde blanco', pantalla_completa: 'en pantalla completa con acercamiento lento', esquina: 'pequeñas en una esquina' };
+    if (usar.length) {
+      l.push('• Imágenes: ' + usar.length + ' de ' + n + ' (' + usar.join(', ') + ') ' + (estilos[im.estilo] || estilos.recuadro_flotante) +
+        (im.posicion ? ', ' + im.posicion : '') + ', ' + ((im.tiempos || []).length
+          ? 'en estos momentos: ' + im.tiempos.map(x => '#' + x.imagen + ' ' + mmss_(x.inicio) + '→' + mmss_(x.fin)).join(', ')
+          : 'repartidas a lo largo del video') + '.');
+    }
+  }
+  const f = p.fundido || {};
+  if (Number(f.entrada) || Number(f.salida)) l.push('• Fundido: ' + [Number(f.entrada) ? 'entrada ' + f.entrada + ' s' : '', Number(f.salida) ? 'salida ' + f.salida + ' s' : ''].filter(Boolean).join(', ') + '.');
+  const d = duracionSalida_(m, t);
+  if (d) l.push('⏱ Duración final aproximada: ' + mmss_(d) + '.');
+  return l.join('\n');
+}
+
+/** Duración aproximada del video final (para decidir la copia maestra automática). */
+function duracionSalida_(m, t) {
+  if (m.modo === 'reel') return duracionCortes_(t.cortes || []);
+  const p = t.plan;
+  if (!p) return m.duracion_video || 0;
+  const tramos = (p.tramos || []).filter(x => x && Number(x.fin) > Number(x.inicio));
+  const base = tramos.length ? tramos.reduce((s, x) => s + Math.min(Number(x.fin), m.duracion_video || 1e9) - Number(x.inicio), 0) : (m.duracion_video || 0);
+  const v = Math.max(0.25, Math.min(4, Number(p.velocidad) || 1));
+  return Math.round(base / v * 10) / 10;
+}
+
+/** Reel periodístico con lo que se dice: Lisa transcribe y Mandy interroga y escribe el guion. */
+function elegirReel_(chat, m) {
+  m.modo = 'reel'; guardarMision_(m);
+  const t = leerTrabajo_(m);
+  if (t.segmentos && t.segmentos.length) return iniciarInterrogatorio_(m, t.segmentos); // ya estaba transcrito
+  if (t.transcrito) return preguntarInstruccion_(m, '🎧 <b>Lisa Davis</b>: este video no tiene voz, así que no puedo armar un reel con lo que se dice.');
+  if (!compartir_(m.video_id, true)) {
+    return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita el operador en GitHub).\n<code>' +
+      esc_(prop_('ULTIMO_ERROR_COMPARTIR', 'sin detalle')) + '</code>');
+  }
+  m.estado = 'transcribiendo'; m.flujo = ''; guardarMision_(m);
+  enviar_(chat, '🎖 <b>Jason Hayes</b>: entendido, <b>reel con lo que se dice</b>.\n' +
+    '🎧 <b>Lisa Davis</b> ya lo está transcribiendo; tarda unos minutos. Te aviso cuando Mandy tenga preguntas.');
+  despachar_('transcribir', m);
+  salaEvento_('lisa', 'trabajando', 'En camino al material.', { mision: resumenSala_(m, 2) });
+}
+
+function imagenesListas_(chat, m) {
+  if (!m.instruccion) return preguntarInstruccion_(m, '🖼 <b>Jason Hayes</b>: tengo ' + (m.imagenes || []).length + ' imágenes.');
+  enviar_(chat, '🖼 <b>Jason Hayes</b>: ' + (m.imagenes || []).length + ' imágenes listas. Armo el plan...');
+  planificar_(chat, m);
+}
+
+/** Abre o cierra el acceso por enlace del video y, si el plan los usa, de las imágenes y el audio de fondo. */
 function compartirMaterial_(m, abrir) {
   let ok = compartir_(m.video_id, abrir);
-  if (m.modo === 'visual') (m.imagenes || []).forEach(id => { ok = compartir_(id, abrir) && ok; });
+  if (m.modo === 'plan' || m.modo === 'visual') {
+    (m.imagenes || []).forEach(id => { ok = compartir_(id, abrir) && ok; });
+    if (m.musica) ok = compartir_(m.musica, abrir) && ok;
+  }
   return ok;
 }
 
@@ -742,14 +912,25 @@ function operador_(b) {
   if (b.tipo === 'transcripcion') {
     if (m.estado !== 'transcribiendo') return;
     const segmentos = b.segmentos || [];
+    if (m.flujo === 'plan') {
+      const tp = leerTrabajo_(m);
+      tp.segmentos = segmentos; tp.duracion = b.duracion || 0; tp.transcrito = true;
+      guardarTrabajo_(m, tp);
+      if (b.duracion) m.duracion_video = b.duracion;
+      m.flujo = ''; m.estado = 'instruccion'; guardarMision_(m);
+      compartir_(m.video_id, false);
+      salaEvento_('lisa', 'listo', 'Transcripción entregada.', { mision: resumenSala_(m, 3) });
+      enviar_(m.chat, '🎧 <b>Lisa Davis</b>: ' + (segmentos.length ? 'transcripción lista (' + segmentos.length + ' frases).' : 'no encontré voz en el video.') +
+        ' Armo el plan con eso.');
+      return planificar_(m.chat, m);
+    }
     if (!segmentos.length) {
-      m.estado = 'instruccion'; guardarMision_(m); compartir_(m.video_id, false);
+      compartir_(m.video_id, false);
       salaEvento_('lisa', 'espera', 'Sin voz en el material. Esperando órdenes.', { mision: resumenSala_(m, 1) });
-      return enviar_(m.chat, '🎧 <b>Lisa Davis</b>: no encontré voz en ese video, así que no hay nada que transcribir para un reel.\n' +
-        '¿Lo trabajamos en modo visual?', [
-        [{ text: '🖼 Quitar el audio y animar imágenes encima', callback_data: 'modo:visual' }],
-        [{ text: '🔇 Solo quitar el audio', callback_data: 'modo:mudo' }],
-        [{ text: '❌ Cancelar', callback_data: 'cancelar' }]]);
+      const ts = leerTrabajo_(m); ts.segmentos = []; ts.transcrito = true; guardarTrabajo_(m, ts);
+      m.modo = ''; guardarMision_(m);
+      return preguntarInstruccion_(m, '🎧 <b>Lisa Davis</b>: no encontré voz en ese video, así que no hay nada que transcribir para un reel.\n' +
+        '🎖 <b>Jason Hayes</b>: ¿qué hacemos entonces con el material?');
     }
     guardarTrabajo_(m, { segmentos: segmentos, duracion: b.duracion || 0 });
     salaEvento_('lisa', 'listo', 'Transcripción entregada: ' + segmentos.length + ' frases.', { mision: resumenSala_(m, 3) });
@@ -887,7 +1068,7 @@ function promptGuion_(transcripcion, respuestas, duracion, ajustes) {
 
 function aprobar_(chat, m, pidioMaestra) {
   const t = leerTrabajo_(m);
-  const quiereMaestra = pidioMaestra || (m.modo === 'visual' ? m.duracion_video || 0 : duracionCortes_(t.cortes || [])) > 60;
+  const quiereMaestra = pidioMaestra || duracionSalida_(m, t) > 60;
   t.maestra_url = '';
   let avisoMaestra = '';
   if (quiereMaestra) {
@@ -906,7 +1087,7 @@ function aprobar_(chat, m, pidioMaestra) {
   }
   m.estado = 'editando'; guardarMision_(m);
   despachar_('editar', m);
-  const que = m.modo === 'visual' ? 'Plan' : 'Guion';
+  const que = m.modo === 'reel' ? 'Guion' : 'Plan';
   salaEvento_('mando', 'listo', que + ' aprobado. Luz verde para Bravo 3.', { mision: resumenSala_(m, 6) });
   salaEvento_('sonny', 'trabajando', 'Orden recibida. Preparando el equipo.', { mision: resumenSala_(m, 6) });
   enviar_(chat, '🎖 <b>Jason Hayes</b>: ' + que.toLowerCase() + ' aprobado. <b>Sonny Quinn</b> en camino; te entrega el video aquí mismo en unos minutos.' + avisoMaestra);
@@ -957,7 +1138,7 @@ function gemini_(sistema, usuario) {
         headers: { 'x-goog-api-key': prop_('GEMINI_API_KEY') },
         payload: JSON.stringify({
           systemInstruction: { parts: [{ text: sistema }] },
-          contents: [{ role: 'user', parts: [{ text: usuario }] }],
+          contents: [{ role: 'user', parts: Array.isArray(usuario) ? usuario : [{ text: usuario }] }],
           generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
         }),
       });
@@ -1076,7 +1257,8 @@ function trabajoParaOperador_(m) {
     video_id: m.video_id, nombre: m.nombre, chat_id: m.chat,
     segmentos: t.segmentos || [], cortes: t.cortes || [], titulo: m.titulo || '', formato: m.formato || 'vertical',
     maestra_url: t.maestra_url || '',
-    modo: m.modo || 'reel', imagenes: m.modo === 'visual' ? (m.imagenes || []) : [], audio: m.audio || 'silencio',
+    modo: m.modo || 'reel', imagenes: m.modo === 'plan' || m.modo === 'visual' ? (m.imagenes || []) : [], audio: m.audio || 'silencio',
+    plan: t.plan || null, musica: m.modo === 'plan' && t.plan && t.plan.audio && t.plan.audio.musica ? (m.musica || '') : '',
     conf: { color: prop_('COLOR_MARCA', '#E30613'), fuente: prop_('FUENTE', 'Liberation Sans'), segundos_titulo: prop_('SEGUNDOS_TITULO', '0') },
   };
 }
