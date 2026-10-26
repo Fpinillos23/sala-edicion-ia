@@ -460,7 +460,7 @@ function probarCompartir() {
   if (!f) return Logger.log('No hay videos en la carpeta entrada.');
   let dueno = '?';
   try { dueno = f.getOwner() ? f.getOwner().getEmail() : '(unidad compartida)'; } catch (e) { dueno = 'no disponible'; }
-  Logger.log('Video: ' + f.getName() + ' — dueño: ' + dueno + ' — tu cuenta: ' + Session.getEffectiveUser().getEmail());
+  Logger.log('Video: ' + f.getName() + ' — dueño: ' + dueno);
   Logger.log('Acceso actual: ' + f.getSharingAccess() + ' / ' + f.getSharingPermission());
   try {
     f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
