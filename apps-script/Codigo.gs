@@ -83,6 +83,10 @@ function diagnosticar() {
   Logger.log('Mensajes en espera: ' + (r.pending_update_count || 0));
   Logger.log('Último error de entrega: ' + (r.last_error_message ? r.last_error_message + ' (' + new Date(r.last_error_date * 1000) + ')' : 'ninguno ✅'));
   Logger.log('Dueño registrado: ' + (prop_('CHAT_DUENO') ? 'sí ✅' : 'todavía no (falta el primer /start)'));
+  if (prop_('CHAT_DUENO')) {
+    const r = tg_('sendMessage', { chat_id: prop_('CHAT_DUENO'), text: '🎖 Jason Hayes: prueba de comunicación desde el diagnóstico.' });
+    Logger.log('Envío de prueba a tu chat: ' + (r.ok ? 'entregado ✅' : 'ERROR — ' + JSON.stringify(r).slice(0, 300)));
+  }
   try { sesionSubidaDrive_({ nombre: 'prueba.mp4' }); Logger.log('Copia maestra en Drive: permiso de subida ✅ (la prueba no crea archivos)'); }
   catch (e) { Logger.log('Copia maestra en Drive: ERROR — ' + (e.message || e)); }
 }
@@ -155,6 +159,7 @@ function doPost(e) {
     else telegram_(body);
     return json_({ ok: true });
   } catch (err) {
+    console.error('Error en doPost: ' + (err && err.stack || err));
     const m = mision_();
     const chat = (m && m.chat) || prop_('CHAT_DUENO');
     if (chat) enviar_(chat, '⚠️ <b>Jason Hayes</b>: tuvimos un problema.\n<code>' + esc_(String(err.message || err)).slice(0, 600) + '</code>');
@@ -175,7 +180,10 @@ function tg_(metodo, datos) {
   const r = UrlFetchApp.fetch('https://api.telegram.org/bot' + prop_('TELEGRAM_TOKEN') + '/' + metodo, {
     method: 'post', contentType: 'application/json', payload: JSON.stringify(datos || {}), muteHttpExceptions: true,
   });
-  try { return JSON.parse(r.getContentText()); } catch (e) { return { ok: false }; }
+  let res;
+  try { res = JSON.parse(r.getContentText()); } catch (e) { res = { ok: false, description: 'respuesta no válida' }; }
+  if (!res.ok) console.error('Telegram ' + metodo + ' falló: ' + JSON.stringify(res).slice(0, 300));
+  return res;
 }
 
 function enviar_(chat, texto, botones) {
