@@ -30,6 +30,12 @@ def main(mision_id):
         comun.reportar(mision_id, "progreso", agente="sonny", texto=texto)
 
     destino = carpeta / "reel.mp4"
+    if "modo" not in t:
+        raise RuntimeError("La implementación de Apps Script está desactualizada (no envía el plan). "
+                           "En Apps Script: Implementar → Administrar implementaciones → ✏️ → Nueva versión → Implementar. "
+                           "Luego pulsa Reintentar.")
+    if t.get("modo") not in ("plan", "visual") and not t.get("cortes"):
+        raise RuntimeError("La misión no trae guía de cortes ni plan de edición. Pulsa Reintentar o vuelve a dar la instrucción.")
     if t.get("modo") in ("plan", "visual"):
         imagenes = []
         for i, img_id in enumerate(t.get("imagenes") or [], 1):
