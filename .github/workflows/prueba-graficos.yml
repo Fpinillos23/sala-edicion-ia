@@ -33,7 +33,7 @@ jobs:
           mkdir -p /tmp/p
           ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=s=1280x720:r=30:d=12 -f lavfi -i sine=f=440:d=12 -c:v libx264 -c:a aac -shortest /tmp/p/v.mp4
           ffmpeg -hide_banner -loglevel error -f lavfi -i "gradients=s=1200x800:d=1" -frames:v 1 /tmp/p/f1.jpg
-          python - <<'PY'
+          python - <<'PY' 2>&1 | tee /tmp/p/log.txt
           import time
           from plan import renderizar_plan
           from editor import info_video
@@ -46,7 +46,9 @@ jobs:
           total = renderizar_plan("/tmp/p/v.mp4", plan, ["/tmp/p/f1.jpg"], None, [], "/tmp/p", "/tmp/p/salida.mp4", conf)
           print("RESULTADO", round(total, 1), "s de video en", round(time.time() - t), "s", info_video("/tmp/p/salida.mp4"))
           PY
+          grep -E "Remotion|animación|no disponibles|RESULTADO|Error|error" /tmp/p/log.txt | head -20 | while read -r l; do echo "::warning::$l"; done
+          echo "::warning::archivos: $(ls /tmp/p/render_plan | tr '\n' ' ')"
           for f in grafico_01.mov grafico_02.mov intro.mp4 cierre.mp4 retocada_01.png con_tarjetas.mp4; do
-            test -s /tmp/p/render_plan/$f || { echo "FALTA $f"; exit 1; }
+            test -s /tmp/p/render_plan/$f || { echo "::error::FALTA $f"; exit 1; }
           done
           echo "Remotion y retoque: OK"

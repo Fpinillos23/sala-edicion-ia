@@ -241,7 +241,7 @@ def _remotion_listo(avisar):
             subprocess.run(["npm", "ci", "--no-audit", "--no-fund", "--loglevel=error"], cwd=GRAFICOS, check=True, timeout=600)
         _remotion["listo"] = True
     except Exception as e:  # noqa: BLE001
-        print(f"   Remotion no disponible ({type(e).__name__}); uso texto fijo.")
+        print(f"   Remotion no disponible ({type(e).__name__}: {str(e)[-200:]}); uso texto fijo.".replace("\n", " "))
         _remotion["listo"] = False
     return _remotion["listo"]
 
@@ -332,7 +332,7 @@ def renderizar_plan(video, plan, imagenes, musica, segmentos, carpeta_trabajo, d
                 animados.append((ruta, x["inicio"], min(x["fin"], total)))
                 x["hecho"] = True
             except Exception as e:  # noqa: BLE001
-                print(f"   Gráfico {i} sin animación ({str(e)[:120]}).")
+                print(f"   Gráfico {i} sin animación ({str(e)[-300:]}).".replace("\n", " "))
     hay_titulo_arriba = any(x["posicion"] == "arriba" for x in p["textos"])  # antes de separar los animados
     p["textos"] = [x for x in p["textos"] if not x.get("hecho")]
     partes, ultimo = [], "0:v"
