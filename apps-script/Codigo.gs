@@ -28,7 +28,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-28.3';
+const VERSION = '2026-10-28.4';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -1293,19 +1293,45 @@ function guardarGuionEnDrive_(m) {
 function mision_() { try { return JSON.parse(prop_('MISION', 'null')); } catch (e) { return null; } }
 function guardarMision_(m) { P_().setProperty('MISION', JSON.stringify(m)); }
 
+/*
+ * El trabajo de la misión (transcripción, plan, guion) se guarda en las Propiedades del script, en trozos de 8 KB.
+ * Antes iba solo en un archivo de Drive, pero Drive puede devolver una copia vieja justo después de escribir,
+ * y una lectura vieja al aprobar borraba el plan. Las propiedades siempre devuelven lo último escrito.
+ * En Drive queda una copia de respaldo (solo escritura).
+ */
+const TROZO = 8000;
+
 function archivoTrabajo_(m) {
   const it = carpeta_('trabajo').getFilesByName('mision_' + m.id + '.json');
   return it.hasNext() ? it.next() : null;
 }
+
 function leerTrabajo_(m) {
+  const props = P_().getProperties();
+  if (props.TRABAJO_ID === m.id) {
+    const n = parseInt(props.TRABAJO_N || '0', 10);
+    let txt = '';
+    for (let i = 0; i < n; i++) txt += props['TRABAJO_' + i] || '';
+    try { return JSON.parse(txt || '{}'); } catch (e) { console.error('Trabajo dañado en propiedades: ' + e); }
+  }
+  // Misiones anteriores a este cambio: se lee el archivo de Drive.
   const f = archivoTrabajo_(m);
   try { return f ? JSON.parse(f.getBlob().getDataAsString('UTF-8')) : {}; } catch (e) { return {}; }
 }
+
 function guardarTrabajo_(m, datos) {
-  const f = archivoTrabajo_(m);
-  const txt = JSON.stringify(datos);
-  if (f) f.setContent(txt);
-  else carpeta_('trabajo').createFile('mision_' + m.id + '.json', txt, 'application/json');
+  const txt = JSON.stringify(datos || {});
+  const anterior = parseInt(prop_('TRABAJO_N', '0'), 10);
+  const nuevas = { TRABAJO_ID: m.id };
+  let n = 0;
+  for (let i = 0; i < txt.length; i += TROZO) nuevas['TRABAJO_' + (n++)] = txt.slice(i, i + TROZO);
+  nuevas.TRABAJO_N = String(n);
+  P_().setProperties(nuevas);
+  for (let i = n; i < anterior; i++) P_().deleteProperty('TRABAJO_' + i);
+  try { // copia de respaldo en Drive
+    const f = archivoTrabajo_(m);
+    if (f) f.setContent(txt); else carpeta_('trabajo').createFile('mision_' + m.id + '.json', txt, 'application/json');
+  } catch (e) { console.error('Respaldo del trabajo en Drive: ' + (e.message || e)); }
 }
 
 function trabajoParaOperador_(m) {
