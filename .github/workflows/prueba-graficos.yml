@@ -1,0 +1,49 @@
+name: Prueba de gráficos (Remotion y retoque)
+
+# Prueba manual: no usa secretos ni toca la sala. Verifica que Remotion y el retoque funcionen en los servidores de GitHub.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: operador/graficos/package-lock.json
+      - name: Herramientas
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq -o Acquire::Retries=3
+          sudo apt-get install -y -qq -o Acquire::Retries=3 ffmpeg fonts-liberation > /dev/null
+          pip install -q -r operador/requirements.txt
+      - name: Editar un video de prueba con plan completo
+        working-directory: operador
+        run: |
+          mkdir -p /tmp/p
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=s=1280x720:r=30:d=12 -f lavfi -i sine=f=440:d=12 -c:v libx264 -c:a aac -shortest /tmp/p/v.mp4
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "gradients=s=1200x800:d=1" -frames:v 1 /tmp/p/f1.jpg
+          python - <<'PY'
+          import time
+          from plan import renderizar_plan
+          from editor import info_video
+          conf = {"fuente": "Liberation Sans", "color": "#E30613", "medio": "Torre Informativa", "logo": ""}
+          plan = {"formato": "vertical", "audio": {"modo": "silencio"},
+                  "textos": [{"texto": "Prueba de titular animado", "posicion": "arriba", "estilo": "titular", "inicio": 0, "fin": 5},
+                             {"texto": "Nombre Apellido", "subtexto": "Cargo", "posicion": "abajo", "estilo": "rotulo", "inicio": 6, "fin": 10}],
+                  "imagenes": {"usar": [1]}, "intro": {"texto": "Prueba"}, "cierre": {"texto": ""}}
+          t = time.time()
+          total = renderizar_plan("/tmp/p/v.mp4", plan, ["/tmp/p/f1.jpg"], None, [], "/tmp/p", "/tmp/p/salida.mp4", conf)
+          print("RESULTADO", round(total, 1), "s de video en", round(time.time() - t), "s", info_video("/tmp/p/salida.mp4"))
+          PY
+          ls /tmp/p/render_plan | grep -E "grafico|intro|cierre|retocada" || (echo "FALTAN GRÁFICOS" && exit 1)
