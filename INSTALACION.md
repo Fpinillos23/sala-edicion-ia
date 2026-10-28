@@ -99,12 +99,21 @@ La sala lee el estado cada 5 segundos por su propia ruta `/api/sala`, y solo mue
   - *"Del segundo 10 al 40, en blanco y negro, al doble de rápido, con el titular Festival Vallenato."*
   - *"Pon esta canción de fondo, suave, y un rótulo abajo que diga Fuente: Alcaldía."*
   - *"Haz un reel de 45 segundos con lo que dice el alcalde"* (este va al flujo de Mandy, con preguntas y guion).
+- **Nota completa con varios clips** (como en un noticiero): escribe `/nota` y envía cada clip con su etiqueta en el pie de foto:
+  - `entrada` — tu presentación a cámara
+  - `entrevista: María Pérez, secretaria de Obras` — el nombre y el cargo salen solos en un rótulo animado la primera vez que aparece
+  - `apoyo` — tomas que van encima mientras se oye la voz
+  - `off` — tu voz en off; también sirve mandarla como **audio** o **nota de voz** 🎙 (en una nota, los audios son off salvo que el pie diga *música*)
+  - `salida` — tu cierre a cámara
+
+  Un video que llega con etiqueta abre la nota solo, sin escribir `/nota`. Si un clip llega sin etiqueta (por ejemplo, el segundo de un álbum), Jason pregunta con botones; para corregir escribe `clip 3: entrevista Juan Gómez, alcalde`. Videos de más de 20 MB: súbelos a **entrada** de Drive y usa `/drive`, o pega el enlace con la etiqueta.
+  Pulsa **✅ Ya envié todo**, da tus indicaciones (duración, enfoque, titular, intro y cierre) o deja que Jason use su criterio. Lisa transcribe cada clip, Jason te muestra la **escaleta** (orden, tiempos y apoyos) y, cuando apruebas, Sonny la monta: corta en finales de frase, pone los apoyos encima con la voz debajo, rellena solo el off con tus apoyos y agrega los rótulos.
 - **Material extra**: envía fotos (sueltas o en álbum) y audios de música de fondo antes o después del video.
 - Jason convierte tu orden en un **plan de edición** y te lo muestra antes de tocar nada. Si falta algo, pregunta; si pides algo que la sala no sabe hacer, te lo dice. Para corregir, escríbele o mándale una nota de voz con el cambio.
 - **Lo que Sonny sabe hacer**: elegir partes del video, cambiar velocidad, formato (vertical, cuadrado, original), color (blanco y negro, cálido, frío, contraste, vivo, brillo), quitar todo el sonido o bajarle el volumen, separar la voz de la música, música de fondo, subtítulos, titulares, rótulos y textos, imágenes (recuadro flotante, pantalla completa o esquina, repartidas o en momentos exactos), fundidos y logo.
 - **Gráficos animados (Remotion)**: titulares, rótulos (nombre y cargo), textos, intro y cierre con la firma del medio entran y salen animados. Si Remotion fallara, Sonny los pone fijos y entrega igual. Remotion es gratis para personas y empresas de hasta 3 empleados; un medio más grande necesita licencia (remotion.pro).
 - **Retoque fotográfico natural**: antes de animar tus fotos, Sonny corrige exposición, color, sombras y luces con valores suaves medidos en cada foto, sin tocar rostros ni piel. Pide *"sin retoque"* si no lo quieres.
-- **Lo que todavía no sabe hacer**: unir varios videos, generar imágenes o voces, traducir, ni quitar objetos de la imagen.
+- **Lo que todavía no sabe hacer**: generar imágenes o voces, traducir, ni quitar objetos de la imagen.
 - **Separar la voz de la música** usa Demucs, un modelo abierto que corre en GitHub; la primera vez tarda varios minutos más en instalarse.
 - En el modo reel, responde las preguntas de Mandy. Si no sabes algo, `/saltar`: quedará como *vacío de información*, nunca se inventa.
 - Elige duración y formato, revisa el guion y pulsa **Aprobar y editar** o **Pedir cambios**.
