@@ -34,9 +34,11 @@ jobs:
           python-version: "3.12"
 
       - name: Preparar herramientas (FFmpeg y tipografías)
+        # Si el servidor de paquetes de Ubuntu se pone lento, se corta a los 10 minutos en vez de esperar media hora.
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-liberation > /dev/null
+          sudo apt-get update -qq -o Acquire::Retries=3
+          sudo apt-get install -y -qq -o Acquire::Retries=3 ffmpeg fonts-liberation > /dev/null
           pip install -q -r operador/requirements.txt
 
       - name: Lisa Davis transcribe
