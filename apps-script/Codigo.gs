@@ -28,7 +28,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-28.2';
+const VERSION = '2026-10-28.3';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -873,6 +873,18 @@ function compartirApi_(id, abrir) {
   }
 }
 
+/** Diagnóstico: muestra en el registro lo que Sonny recibe de la misión actual (sin claves). Ejecútala desde el editor. */
+function diagnosticarMision() {
+  const m = mision_();
+  if (!m) return Logger.log('No hay misión guardada.');
+  const t = trabajoParaOperador_(m);
+  Logger.log('Misión: ' + m.codigo + ' · estado ' + m.estado + ' · modo ' + (m.modo || '(vacío)') + ' · duración del video ' + (m.duracion_video || '?') + ' s');
+  Logger.log('Instrucciones: ' + (m.instruccion || '(ninguna)'));
+  Logger.log('Imágenes: ' + (m.imagenes || []).length + ' · música: ' + (m.musica ? 'sí' : 'no'));
+  Logger.log('Plan que recibe Sonny: ' + JSON.stringify(t.plan));
+  Logger.log('Modo que recibe Sonny: ' + t.modo + ' · cortes: ' + (t.cortes || []).length + ' · segmentos: ' + (t.segmentos || []).length);
+}
+
 /** Prueba: intenta compartir por enlace el video más reciente de "entrada" y explica qué pasa. */
 function probarCompartir() {
   const it = carpeta_('entrada').getFiles();
@@ -981,6 +993,7 @@ function operador_(b) {
 
   if (b.tipo === 'listo') {
     if (m.estado !== 'editando') return;
+    m.ultima_entrega = { duracion: b.duracion || 0, peso_mb: b.peso_mb || 0, t: Date.now() };
     m.estado = 'lista'; m.reels = (m.reels || 0) + 1; guardarMision_(m);
     compartirMaterial_(m, false);
     guardarGuionEnDrive_(m);
@@ -990,8 +1003,8 @@ function operador_(b) {
     if (b.maestra_id) maestra = '\n💾 Copia maestra (sin recomprimir, ' + (b.maestra_mb || '?') + ' MB): https://drive.google.com/file/d/' + b.maestra_id + '/view';
     else if (b.maestra_error) maestra = '\n⚠️ La copia maestra no se pudo guardar en Drive; el reel de Telegram sí está completo.';
     return enviar_(m.chat, '🎖 <b>Jason Hayes</b>: misión cumplida, comandante.' +
-      (m.modo === 'visual' ? '' : ' El guion quedó guardado en la carpeta <b>salida</b> de Drive.') + maestra,
-      [[{ text: m.modo === 'visual' ? '🎬 Otra versión con este material' : '🎬 Otro reel con este video', callback_data: 'otro' }],
+      (m.modo === 'reel' ? ' El guion quedó guardado en la carpeta <b>salida</b> de Drive.' : '') + maestra,
+      [[{ text: m.modo === 'reel' ? '🎬 Otro reel con este video' : '🎬 Otra versión con este material', callback_data: 'otro' }],
         [{ text: '✅ Cerrar misión', callback_data: 'cerrar' }]]);
   }
 }
