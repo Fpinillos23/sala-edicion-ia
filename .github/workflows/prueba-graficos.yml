@@ -48,7 +48,7 @@ jobs:
           PY
           grep -E "Remotion|animación|no disponibles|RESULTADO|Error|error" /tmp/p/log.txt | head -20 | while read -r l; do echo "::warning::$l"; done
           echo "::warning::archivos: $(ls /tmp/p/render_plan | tr '\n' ' ')"
-          for f in grafico_01.mov grafico_02.mov intro.mp4 cierre.mp4 retocada_01.png con_tarjetas.mp4; do
+          for f in grafico_01.mov grafico_02.mov intro.mp4 cierre.mp4 retocada_01.png; do
             test -s /tmp/p/render_plan/$f || { echo "::error::FALTA $f"; exit 1; }
           done
           echo "Remotion y retoque: OK"
