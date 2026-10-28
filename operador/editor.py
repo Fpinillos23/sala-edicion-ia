@@ -34,6 +34,7 @@ def info_video(ruta):
         "ancho": w, "alto": h,
         "duracion": float(d.get("format", {}).get("duration", 0) or 0),
         "tiene_audio": any(s.get("codec_type") == "audio" for s in d.get("streams", [])),
+        "tiene_video": bool(v) and v.get("disposition", {}).get("attached_pic", 0) != 1,
     }
 
 

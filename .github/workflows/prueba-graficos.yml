@@ -52,3 +52,36 @@ jobs:
             test -s /tmp/p/render_plan/$f || { echo "::error::FALTA $f"; exit 1; }
           done
           echo "Remotion y retoque: OK"
+      - name: Armar una nota de prueba (entrada, off, entrevista, apoyos, salida)
+        working-directory: operador
+        run: |
+          mkdir -p /tmp/n && cd /tmp/n
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=s=1280x720:r=30:d=8 -f lavfi -i sine=f=300:d=8 -c:v libx264 -c:a aac -shortest entrada.mp4
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=s=1280x720:r=30:d=10 -f lavfi -i sine=f=400:d=10 -c:v libx264 -c:a aac -shortest entrevista.mp4
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "mandelbrot=s=1280x720:r=30" -t 6 -c:v libx264 apoyo1.mp4
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "cellauto=s=1280x720:r=30" -t 4 -c:v libx264 apoyo2.mp4
+          ffmpeg -hide_banner -loglevel error -f lavfi -i sine=f=600:d=7 -c:a libmp3lame off.mp3
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "smptebars=s=1080x1920:r=30:d=5" -f lavfi -i sine=f=200:d=5 -c:v libx264 -c:a aac -shortest salida.mp4
+          cd $GITHUB_WORKSPACE/operador
+          python - <<'PY' 2>&1 | tee /tmp/n/log.txt
+          from nota import renderizar_nota
+          from editor import info_video
+          N = "/tmp/n"
+          clips = [{"tipo": "entrada"}, {"tipo": "entrevista", "nombre": "María Pérez", "cargo": "Secretaria de Obras"},
+                   {"tipo": "apoyo"}, {"tipo": "apoyo"}, {"tipo": "off"}, {"tipo": "salida"}]
+          rutas = [f"{N}/{x}" for x in ["entrada.mp4", "entrevista.mp4", "apoyo1.mp4", "apoyo2.mp4", "off.mp3", "salida.mp4"]]
+          plan = {"formato": "vertical", "bloques": [{"clip": 1, "inicio": 0, "fin": 6}, {"clip": 5, "inicio": 0, "fin": 7},
+                  {"clip": 2, "inicio": 1, "fin": 9}, {"clip": 6, "inicio": 0, "fin": 5}],
+                  "tapas": [{"apoyo": 4, "desde": 0, "en": 17, "dura": 3}], "subtitulos": True,
+                  "textos": [{"texto": "Obras en el Guatapurí", "estilo": "titular", "posicion": "arriba", "inicio": 0, "fin": 6}]}
+          seg = {"2": [{"inicio": 1.5, "fin": 4, "texto": "estamos trabajando en la obra"}], "5": [{"inicio": 0.5, "fin": 3, "texto": "voz en off"}]}
+          conf = {"fuente": "Liberation Sans", "color": "#E30613", "medio": "Torre Informativa", "logo": ""}
+          total = renderizar_nota(rutas, clips, plan, [], None, seg, N, f"{N}/nota.mp4", conf)
+          print("NOTA", round(total, 1), info_video(f"{N}/nota.mp4"))
+          PY
+          grep -E "NOTA|Error|error|animación" /tmp/n/log.txt | while read -r l; do echo "::warning::$l"; done
+          negros=$(ffmpeg -hide_banner -i /tmp/n/nota.mp4 -vf "trim=5.9:13.2,scale=8:8,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG" -f null - 2>&1 | grep -o "YAVG=[0-9.]*" | awk -F= '$2<25{c++} END{print c+0}')
+          echo "::warning::cuadros negros en el off: $negros"
+          test "$negros" = "0"
+          test -s /tmp/n/render_nota/render_plan/grafico_02.mov || { echo "::error::falta el rótulo automático"; exit 1; }
+          echo "Nota: OK"
