@@ -46,4 +46,7 @@ jobs:
           total = renderizar_plan("/tmp/p/v.mp4", plan, ["/tmp/p/f1.jpg"], None, [], "/tmp/p", "/tmp/p/salida.mp4", conf)
           print("RESULTADO", round(total, 1), "s de video en", round(time.time() - t), "s", info_video("/tmp/p/salida.mp4"))
           PY
-          ls /tmp/p/render_plan | grep -E "grafico|intro|cierre|retocada" || (echo "FALTAN GRÁFICOS" && exit 1)
+          for f in grafico_01.mov grafico_02.mov intro.mp4 cierre.mp4 retocada_01.png con_tarjetas.mp4; do
+            test -s /tmp/p/render_plan/$f || { echo "FALTA $f"; exit 1; }
+          done
+          echo "Remotion y retoque: OK"
