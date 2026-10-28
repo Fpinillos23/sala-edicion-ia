@@ -9,15 +9,21 @@ El plan es un JSON validado aquí (nunca se ejecutan comandos escritos por la IA
   "audio": {"modo": "original|silencio|solo_voz", "volumen": 1.0,
             "musica": false, "volumen_musica": 0.35},
   "subtitulos": false,
-  "textos": [{"texto": "", "inicio": s, "fin": s, "posicion": "arriba|centro|abajo", "estilo": "titular|rotulo|simple"}],
+  "textos": [{"texto": "", "subtexto": "", "inicio": s, "fin": s, "posicion": "arriba|centro|abajo",
+              "estilo": "titular|rotulo|simple", "animado": true}],   # animado = gráfico de Remotion
+  "intro": {"texto": "", "subtexto": "", "segundos": 3} | null,       # tarjeta animada al inicio (Remotion)
+  "cierre": {"texto": "", "subtexto": "", "segundos": 3} | null,      # tarjeta con la firma del medio al final
   "imagenes": {"usar": [1, 2], "estilo": "recuadro_flotante|pantalla_completa|esquina",
                "posicion": "arriba|centro|abajo|izquierda|derecha", "tamano": 0.7,
-               "tiempos": [{"imagen": 1, "inicio": s, "fin": s}]},     # sin tiempos = repartidas parejo
+               "tiempos": [{"imagen": 1, "inicio": s, "fin": s}],      # sin tiempos = repartidas parejo
+               "retoque": true},                                          # retoque fotográfico natural
   "fundido": {"entrada": 0.0, "salida": 0.0},
   "logo": true
 }
 Los tiempos de "textos" e "imagenes.tiempos" están en la línea de tiempo del video FINAL.
 """
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -76,7 +82,8 @@ def validar(plan, duracion, n_imagenes, hay_musica):
         b = _num(x.get("fin"), total, 0, total)
         if b - a < 0.3:
             a, b = 0.0, total
-        textos.append({"texto": texto[:160], "inicio": a, "fin": b,
+        textos.append({"texto": texto[:160], "subtexto": str(x.get("subtexto") or "").strip()[:120], "inicio": a, "fin": b,
+                       "animado": x.get("animado") is not False,
                        "posicion": x.get("posicion") if x.get("posicion") in ("arriba", "centro", "abajo") else "arriba",
                        "estilo": x.get("estilo") if x.get("estilo") in ("titular", "rotulo", "simple") else "titular"})
     p["textos"] = textos[:12]
@@ -92,11 +99,19 @@ def validar(plan, duracion, n_imagenes, hay_musica):
                      "estilo": im.get("estilo") if im.get("estilo") in ("recuadro_flotante", "pantalla_completa", "esquina") else "recuadro_flotante",
                      "posicion": im.get("posicion") if im.get("posicion") in ("arriba", "centro", "abajo", "izquierda", "derecha") else "",
                      "tamano": _num(im.get("tamano"), 0.0, 0.15, 1.0),
-                     "tiempos": tiempos if n_imagenes else []}
+                     "tiempos": tiempos if n_imagenes else [],
+                     "retoque": im.get("retoque") is not False}
     f = p.get("fundido") or {}
     p["fundido"] = {"entrada": _num(f.get("entrada"), 0.0, 0, min(3, total / 3)),
                     "salida": _num(f.get("salida"), 0.0, 0, min(3, total / 3))}
     p["logo"] = p.get("logo") is not False
+    for k in ("intro", "cierre"):
+        t = p.get(k)
+        if isinstance(t, dict) and (k == "cierre" or str(t.get("texto") or "").strip()):
+            p[k] = {"texto": str(t.get("texto") or "").strip()[:120], "subtexto": str(t.get("subtexto") or "").strip()[:120],
+                    "segundos": _num(t.get("segundos"), 3.0, 1.5, 6.0)}
+        else:
+            p[k] = None
     p["total"] = round(total, 2)
     return p
 
@@ -212,6 +227,46 @@ def _solo_voz(audio_wav, carpeta, avisar):
     return voz
 
 
+GRAFICOS = Path(__file__).resolve().parent / "graficos"
+_remotion = {"listo": None}
+
+
+def _remotion_listo(avisar):
+    """Instala una sola vez el proyecto de gráficos de Remotion. Si falla, la edición sigue con texto fijo."""
+    if _remotion["listo"] is not None:
+        return _remotion["listo"]
+    try:
+        if not (GRAFICOS / "node_modules" / "remotion").exists():
+            avisar("Preparando los gráficos animados (Remotion)")
+            subprocess.run(["npm", "ci", "--no-audit", "--no-fund", "--loglevel=error"], cwd=GRAFICOS, check=True, timeout=600)
+        _remotion["listo"] = True
+    except Exception as e:  # noqa: BLE001
+        print(f"   Remotion no disponible ({type(e).__name__}); uso texto fijo.")
+        _remotion["listo"] = False
+    return _remotion["listo"]
+
+
+def _render_grafico(composicion, props, salida, transparente):
+    args = ["npx", "remotion", "render", "src/index.ts", composicion, str(salida), "--props=" + json.dumps(props, ensure_ascii=False),
+            "--log=error"]
+    if transparente:  # guía oficial "transparent-videos": ProRes 4444 con canal alfa
+        args += ["--codec=prores", "--prores-profile=4444", "--pixel-format=yuva444p10le", "--image-format=png"]
+    else:
+        args += ["--codec=h264", "--crf=18"]
+    if os.environ.get("REMOTION_NAVEGADOR"):  # solo para pruebas fuera de GitHub
+        args.append("--browser-executable=" + os.environ["REMOTION_NAVEGADOR"])
+    r = subprocess.run(args, cwd=GRAFICOS, capture_output=True, text=True, timeout=900)
+    if r.returncode != 0 or not Path(salida).exists():
+        raise RuntimeError("Remotion: " + (r.stderr or r.stdout)[-400:])
+    return Path(salida)
+
+
+def _props(texto, subtexto, posicion, W, H, segundos, conf):
+    return {"texto": texto, "subtexto": subtexto, "color": conf.get("color") or "#E30613",
+            "medio": conf.get("medio") or "Torre Informativa", "posicion": posicion,
+            "ancho": W, "alto": H, "segundos": round(segundos, 2)}
+
+
 def renderizar_plan(video, plan, imagenes, musica, segmentos, carpeta_trabajo, destino, conf, avisar=print):
     video, destino = Path(video).resolve(), Path(destino).resolve()
     trabajo = Path(carpeta_trabajo).resolve() / "render_plan"
@@ -265,11 +320,35 @@ def renderizar_plan(video, plan, imagenes, musica, segmentos, carpeta_trabajo, d
     if p["subtitulos"] and segmentos:
         frases, _ = frases_subtitulo(p["tramos"], segmentos)
         frases = [(a / vel, b / vel, x) for a, b, x in frases]
+    # Textos animados (Remotion). Si Remotion no está disponible o falla, esos textos salen fijos con ASS.
+    animados = []
+    if any(x["animado"] for x in p["textos"]) and _remotion_listo(avisar):
+        avisar("Animando titulares y rótulos (Remotion)")
+        comp = {"titular": "Titular", "rotulo": "Rotulo", "simple": "Simple"}
+        for i, x in enumerate([x for x in p["textos"] if x["animado"]], 1):
+            try:
+                ruta = _render_grafico(comp[x["estilo"]], _props(x["texto"], x["subtexto"], x["posicion"], W, H,
+                                       min(x["fin"], total) - x["inicio"], conf), trabajo / f"grafico_{i:02d}.mov", True)
+                animados.append((ruta, x["inicio"], min(x["fin"], total)))
+                x["hecho"] = True
+            except Exception as e:  # noqa: BLE001
+                print(f"   Gráfico {i} sin animación ({str(e)[:120]}).")
+    hay_titulo_arriba = any(x["posicion"] == "arriba" for x in p["textos"])  # antes de separar los animados
+    p["textos"] = [x for x in p["textos"] if not x.get("hecho")]
     partes, ultimo = [], "0:v"
-    hay_titulo_arriba = any(x["posicion"] == "arriba" for x in p["textos"])
     im = p["imagenes"]
     bw, bh, px, py, borde, zoom = _caja_imagen(im["estilo"], im["posicion"], im["tamano"], W, H, hay_titulo_arriba, bool(frases))
     tiempos = _tiempos_imagenes(p, total)
+    if tiempos and im["retoque"]:
+        avisar("Retocando las imágenes (luz y color naturales)")
+        from retoque import mejorar
+        retocadas = list(imagenes)
+        for n in sorted({n for n, _, _ in tiempos}):
+            try:
+                retocadas[n - 1], _, _ = mejorar(imagenes[n - 1], trabajo / f"retocada_{n:02d}")
+            except Exception as e:  # noqa: BLE001  una foto rara no detiene la edición
+                print(f"   No se pudo retocar la imagen {n} ({type(e).__name__}); va sin retoque.")
+        imagenes = retocadas
     if tiempos:
         avisar(f"Animando {len(tiempos)} imágenes")
     for k, (n, ini, dura) in enumerate(tiempos, 1):
@@ -295,6 +374,12 @@ def renderizar_plan(video, plan, imagenes, musica, segmentos, carpeta_trabajo, d
                       f"enable='between(t,{ini:.2f},{ini + dura:.2f})'[v{k}]")
         ultimo = f"v{k}"
 
+    for k, (ruta, ini, fin) in enumerate(animados, 1):
+        idx = entradas.count("-i")
+        entradas += ["-i", str(ruta)]
+        partes.append(f"[{idx}:v]format=yuva444p,setpts=PTS-STARTPTS+{ini:.2f}/TB[g{k}]")
+        partes.append(f"[{ultimo}][g{k}]overlay=0:0:eof_action=pass:enable='between(t,{ini:.2f},{fin:.2f})'[vg{k}]")
+        ultimo = f"vg{k}"
     if p["textos"] or frases:
         _escribir_ass(trabajo / "textos.ass", p, frases, (W, H), conf, hay_subs=bool(frases))
         partes.append(f"[{ultimo}]ass=textos.ass[vt]")
@@ -341,6 +426,40 @@ def renderizar_plan(video, plan, imagenes, musica, segmentos, carpeta_trabajo, d
                         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
                         "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "final.mp4"],
             cwd=str(trabajo))
+    final = trabajo / "final.mp4"
+    if (p["intro"] or p["cierre"]) and _remotion_listo(avisar):
+        try:
+            final, total = _tarjetas(final, total, p, W, H, conf, trabajo, avisar)
+        except Exception as e:  # noqa: BLE001  sin tarjetas, pero con el video completo
+            print(f"   Intro/cierre no disponibles ({str(e)[:160]}).")
     Path(destino).parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(trabajo / "final.mp4"), str(destino))
+    shutil.move(str(final), str(destino))
     return total
+
+
+def _tarjetas(final, total, p, W, H, conf, trabajo, avisar):
+    """Intro y cierre animados con Remotion, unidos al video con audio en silencio durante las tarjetas."""
+    avisar("Animando la intro y el cierre (Remotion)")
+    piezas = []
+    if p["intro"]:
+        i = p["intro"]
+        piezas.append(_render_grafico("Tarjeta", _props(i["texto"], i["subtexto"], "centro", W, H, i["segundos"], conf), trabajo / "intro.mp4", False))
+    piezas.append(final)
+    if p["cierre"]:
+        c = p["cierre"]
+        piezas.append(_render_grafico("Tarjeta", _props(c["texto"], c["subtexto"], "centro", W, H, c["segundos"], conf), trabajo / "cierre.mp4", False))
+    entradas, cadena = [], ""
+    for k, pieza in enumerate(piezas):
+        entradas += ["-i", str(pieza)]
+        if pieza == final:
+            cadena += f"[{k}:v]fps=30,format=yuv420p,setsar=1[v{k}];[{k}:a]aresample=48000[a{k}];"
+        else:
+            dur = info_video(pieza)["duracion"]
+            cadena += (f"[{k}:v]scale={W}:{H},fps=30,format=yuv420p,setsar=1[v{k}];"
+                       f"anullsrc=r=48000:cl=stereo,atrim=0:{dur:.2f}[a{k}];")
+    cadena += "".join(f"[v{k}][a{k}]" for k in range(len(piezas))) + f"concat=n={len(piezas)}:v=1:a=1[v][a]"
+    salida = trabajo / "con_tarjetas.mp4"
+    _ffmpeg(entradas + ["-filter_complex", cadena, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", str(salida)],
+            cwd=str(trabajo))
+    return salida, info_video(salida)["duracion"]

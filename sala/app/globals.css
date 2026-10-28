@@ -1,0 +1,130 @@
+/* Centro de Operaciones Bravo. Layout: mesa de mapas de un centro de operaciones tácticas — tablero de misión arriba, puestos de operadores en rejilla, radio-bitácora al lado */
+:root {
+  --fondo: #E6E4D8;          /* papel de briefing, verde caqui muy claro */
+  --panel: #F3F2EA;
+  --linea: #C9C6B4;
+  --reticula: rgba(70, 76, 52, 0.07);
+  --texto: #1F231B;
+  --tenue: #5E6352;
+  --ambar: #8F5A00;           /* luz táctica ámbar */
+  --ambar-suave: rgba(143, 90, 0, 0.12);
+  --ok: #2F6B3A;
+  --alerta: #A3261B;
+  --espera: #7A7D6E;
+  --display: "Saira Stencil One", "Arial Narrow", Impact, sans-serif;
+  --cuerpo: "Barlow Semi Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fondo: #0F1418; --panel: #161D22; --linea: #2A343B; --reticula: rgba(224, 168, 40, 0.05);
+    --texto: #E3E1D3; --tenue: #94998A; --ambar: #E3A82B; --ambar-suave: rgba(227, 168, 43, 0.13);
+    --ok: #6CBF73; --alerta: #F06A55; --espera: #7D857C; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --fondo: #0F1418; --panel: #161D22; --linea: #2A343B; --reticula: rgba(224, 168, 40, 0.05);
+  --texto: #E3E1D3; --tenue: #94998A; --ambar: #E3A82B; --ambar-suave: rgba(227, 168, 43, 0.13);
+  --ok: #6CBF73; --alerta: #F06A55; --espera: #7D857C; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background-color: var(--fondo);
+  background-image:
+    linear-gradient(var(--reticula) 1px, transparent 1px),
+    linear-gradient(90deg, var(--reticula) 1px, transparent 1px);
+  background-size: 32px 32px;
+  color: var(--texto);
+  font: 500 16px/1.45 var(--cuerpo);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.marco { max-width: 1180px; margin: 0 auto; display: grid; gap: 20px; }
+
+/* Barra superior */
+.barra {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px;
+  border-bottom: 2px solid var(--texto); padding-bottom: 10px;
+}
+.marca { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.marca h1 { margin: 0; font: 400 clamp(1.5rem, 4vw, 2.1rem)/1 var(--display); letter-spacing: 0.02em; text-wrap: balance; }
+.marca span { font: 600 0.8rem/1 var(--cuerpo); letter-spacing: 0.14em; text-transform: uppercase; color: var(--tenue); }
+.instrumentos { display: flex; gap: 18px; align-items: center; font: 500 0.85rem/1 var(--mono); font-variant-numeric: tabular-nums; }
+.enlace { display: inline-flex; align-items: center; gap: 7px; text-transform: uppercase; letter-spacing: 0.08em; }
+.enlace i { width: 9px; height: 9px; border-radius: 50%; background: var(--espera); }
+.enlace[data-modo="vivo"] i { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent); }
+.enlace[data-modo="demo"] i { background: var(--ambar); }
+.enlace[data-modo="caido"] i { background: var(--alerta); }
+
+/* Tablero de misión */
+.mision {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 28px; align-items: end;
+  background: var(--panel); border: 1px solid var(--linea); padding: 20px 22px;
+}
+.mision small { display: block; font: 600 0.75rem/1 var(--cuerpo); letter-spacing: 0.16em; text-transform: uppercase; color: var(--tenue); margin-bottom: 8px; }
+.codigo { margin: 0; font: 400 clamp(1.9rem, 6vw, 3.4rem)/1 var(--display); color: var(--ambar); text-wrap: balance; overflow-wrap: anywhere; }
+.reloj-mision { text-align: right; font: 500 0.85rem/1.5 var(--mono); color: var(--tenue); font-variant-numeric: tabular-nums; }
+.reloj-mision b { display: block; font: 500 1.6rem/1.1 var(--mono); color: var(--texto); }
+.etapas { grid-column: 1 / -1; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; counter-reset: e; }
+.etapas li { counter-increment: e; padding: 8px 6px 6px; border-top: 4px solid var(--linea); font: 600 0.78rem/1.2 var(--cuerpo); letter-spacing: 0.04em; text-transform: uppercase; color: var(--tenue); min-width: 0; overflow-wrap: anywhere; }
+.etapas li::before { content: counter(e, decimal-leading-zero); display: block; font: 500 0.7rem/1 var(--mono); margin-bottom: 4px; }
+.etapas li.hecha { border-top-color: var(--texto); color: var(--texto); }
+.etapas li.actual { border-top-color: var(--ambar); color: var(--ambar); background: var(--ambar-suave); }
+
+/* Cuerpo: puestos + radio */
+.cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.puestos { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.puesto {
+  background: var(--panel); border: 1px solid var(--linea); padding: 16px 16px 14px; display: grid; gap: 10px;
+  position: relative; min-width: 0;
+}
+.puesto[data-estado="trabajando"] { border-color: var(--ambar); }
+.puesto[data-estado="alerta"] { border-color: var(--alerta); }
+.cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.indicativo { font: 500 0.78rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tenue); }
+.pill { font: 700 0.7rem/1 var(--cuerpo); letter-spacing: 0.12em; text-transform: uppercase; padding: 5px 8px; border: 1.5px solid currentColor; white-space: nowrap; }
+.pill[data-e="espera"] { color: var(--espera); }
+.pill[data-e="trabajando"] { color: var(--ambar); }
+.pill[data-e="listo"] { color: var(--ok); }
+.pill[data-e="alerta"] { color: var(--alerta); }
+.puesto h3 { margin: 0; font: 700 1.35rem/1.1 var(--cuerpo); letter-spacing: 0.01em; }
+.rol { margin: 0; color: var(--tenue); font-size: 0.92rem; }
+.linea { margin: 0; padding-top: 10px; border-top: 1px dashed var(--linea); font: 400 0.86rem/1.45 var(--mono); min-height: 3.1em; overflow-wrap: anywhere; }
+.linea time { display: block; color: var(--tenue); font-size: 0.74rem; margin-top: 4px; }
+.puesto[data-estado="trabajando"] .linea::after { content: "▍"; color: var(--ambar); animation: parpadeo 1s steps(2) infinite; margin-left: 2px; }
+@keyframes parpadeo { 50% { opacity: 0; } }
+
+.radio { background: var(--panel); border: 1px solid var(--linea); display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
+.radio header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--linea); }
+.radio h2 { margin: 0; font: 700 0.8rem/1 var(--cuerpo); letter-spacing: 0.16em; text-transform: uppercase; }
+.radio header span { font: 500 0.72rem/1 var(--mono); color: var(--tenue); }
+.log { list-style: none; margin: 0; padding: 6px 0; max-height: 470px; overflow-y: auto; }
+.log li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; padding: 8px 16px; font: 400 0.84rem/1.4 var(--mono); }
+.log li + li { border-top: 1px solid var(--linea); }
+.log time { color: var(--tenue); font-variant-numeric: tabular-nums; }
+.log b { font-weight: 500; color: var(--ambar); text-transform: uppercase; font-size: 0.74rem; letter-spacing: 0.06em; display: block; }
+.log p { margin: 0; overflow-wrap: anywhere; }
+.vacio { padding: 18px 16px; color: var(--tenue); font: 400 0.86rem/1.4 var(--mono); }
+.cifras { display: flex; gap: 22px; padding: 14px 16px; border-top: 1px solid var(--linea); }
+.cifras div { font: 600 0.72rem/1.2 var(--cuerpo); letter-spacing: 0.12em; text-transform: uppercase; color: var(--tenue); }
+.cifras b { display: block; font: 400 1.9rem/1 var(--display); color: var(--texto); letter-spacing: 0; margin-bottom: 4px; }
+
+.pie { font: 400 0.8rem/1.5 var(--mono); color: var(--tenue); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+
+@media (max-width: 900px) {
+  .cuerpo { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  .mision { grid-template-columns: minmax(0, 1fr); }
+  .reloj-mision { text-align: left; }
+  .etapas { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; }
+  .etapas li { overflow-wrap: normal; hyphens: auto; font-size: 0.74rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .puesto[data-estado="trabajando"] .linea::after { animation: none; }
+}
+
+.version { font: 400 0.72rem/1 var(--mono); color: var(--tenue); }

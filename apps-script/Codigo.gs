@@ -12,10 +12,10 @@
  */
 
 const AGENTES = {
-  jason: { nombre: 'Jason Hayes', alias: 'Bravo 1', rol: 'Coordina la misión' },
+  jason: { nombre: 'Jason Hayes', alias: 'Bravo 1', rol: 'Coordina y arma el plan de edición' },
   lisa:  { nombre: 'Lisa Davis',  alias: 'Inteligencia', rol: 'Transcribe el material' },
-  mandy: { nombre: 'Mandy Ellis', alias: 'Enlace', rol: 'Interroga y escribe el guion' },
-  sonny: { nombre: 'Sonny Quinn', alias: 'Bravo 3', rol: 'Corta y entrega el reel' },
+  mandy: { nombre: 'Mandy Ellis', alias: 'Enlace', rol: 'Guion de reels de entrevistas' },
+  sonny: { nombre: 'Sonny Quinn', alias: 'Bravo 3', rol: 'Edita y entrega el video' },
 };
 
 const FORMATOS = {
@@ -24,9 +24,11 @@ const FORMATOS = {
   '3': ['original', 'Formato original'],
 };
 
-const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Interrogatorio', 'Guion', 'Aprobación', 'Edición', 'Entregado'];
+const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Plan o guion', 'Aprobación', 'Edición', 'Entregado'];
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
+// Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
+const VERSION = '2026-10-28.2';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -160,6 +162,7 @@ function carpeta_(n) {
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.accion === 'sala') return json_(estadoSala_());
+  if (p.accion === 'version') return json_({ ok: true, version: VERSION });
   if (p.accion === 'trabajo') {
     if (!p.k || p.k !== prop_('CLAVE_SALA')) return json_({ ok: false });
     const m = mision_();
@@ -352,6 +355,7 @@ function boton_(q) {
     return enviar_(chat, '🎖 <b>Jason Hayes</b>: misión cerrada. Buen trabajo, comandante. Envíame el próximo video cuando quieras.');
   }
   if (d.indexOf('reintentar:') === 0 && m.estado === 'error') {
+    if (!implementacionAlDia_(chat)) return enviar_(chat, '🔁 Cuando la publiques, pulsa aquí.', [[{ text: '🔁 Reintentar', callback_data: d }]]);
     const tipo = d.slice(11);
     m.estado = tipo === 'editar' ? 'editando' : 'transcribiendo'; guardarMision_(m);
     compartirMaterial_(m, true);
@@ -621,11 +625,16 @@ const CAPACIDADES_PLAN =
   '- audio: {"modo": "original|silencio|solo_voz", "volumen": 0 a 3, "musica": true/false, "volumen_musica": 0 a 2}. ' +
   '"silencio" quita TODO el sonido. "solo_voz" separa la voz y quita la música de fondo (tarda más). "musica" usa el audio de fondo que envió el periodista (solo si existe).\n' +
   '- subtitulos: true/false (solo si hay transcripción con voz).\n' +
-  '- textos en pantalla: [{"texto": "", "inicio": s, "fin": s, "posicion": "arriba|centro|abajo", "estilo": "titular|rotulo|simple"}]. ' +
-  'titular = recuadro de color de marca; rotulo = banda oscura (fuentes, nombres, cargos); simple = letra blanca con borde.\n' +
+  '- textos en pantalla: [{"texto": "", "subtexto": "", "inicio": s, "fin": s, "posicion": "arriba|centro|abajo", "estilo": "titular|rotulo|simple", "animado": true}]. ' +
+  'titular = barra del color del medio; rotulo = banda oscura para nombre (texto) y cargo o fuente (subtexto); simple = letra blanca con sombra. ' +
+  'Por defecto entran y salen ANIMADOS (gráficos hechos con Remotion); "animado": false los deja fijos.\n' +
+  '- intro: {"texto": "", "subtexto": "", "segundos": 3} = tarjeta animada al inicio con ese titular y la firma del medio. null si no la pide.\n' +
+  '- cierre: {"texto": "", "subtexto": "", "segundos": 3} = tarjeta final con el nombre del medio (texto vacío = solo el medio). null si no la pide.\n' +
   '- imagenes: {"usar": [números de imagen en orden], "estilo": "recuadro_flotante|pantalla_completa|esquina", ' +
   '"posicion": "arriba|centro|abajo|izquierda|derecha" o "", "tamano": 0.15 a 1 o 0 (automático), ' +
-  '"tiempos": [{"imagen": n, "inicio": s, "fin": s}] o [] para repartirlas parejo a lo largo del video}. Todas entran y salen con fundido.\n' +
+  '"tiempos": [{"imagen": n, "inicio": s, "fin": s}] o [] para repartirlas parejo a lo largo del video, ' +
+  '"retoque": true}. Todas entran y salen con fundido. "retoque" = retoque fotográfico natural (luz, color y nitidez suaves, sin alterar rostros); ' +
+  'va activado salvo que el periodista diga que no.\n' +
   '- fundido: {"entrada": segundos, "salida": segundos} (0 a 3).\n' +
   '- logo: true/false (logo del medio arriba a la derecha, si existe).\n' +
   'Los tiempos de textos e imágenes van en la línea de tiempo del video FINAL (después de cortes y cambio de velocidad).\n' +
@@ -662,7 +671,8 @@ function planificar_(chat, m) {
       '6. Lo que la sala no sabe hacer va en "no_se_puede", explicado en una frase; igual planea el resto si tiene sentido.\n\n' +
       'Devuelve este JSON:\n{"tipo": "plan" | "reel" | "preguntar" | "necesito_imagenes" | "necesito_transcripcion", ' +
       '"entendido": "una o dos frases, en segunda persona, de lo que vas a hacer", "preguntas": [], "no_se_puede": [], ' +
-      '"plan": {"formato": "", "tramos": [], "velocidad": 1, "color": {}, "audio": {}, "subtitulos": false, "textos": [], "imagenes": {}, "fundido": {}, "logo": true}}');
+      '"plan": {"formato": "", "tramos": [], "velocidad": 1, "color": {}, "audio": {}, "subtitulos": false, "textos": [], "imagenes": {}, ' +
+      '"intro": null, "cierre": null, "fundido": {}, "logo": true}}');
   } catch (e) {
     console.error('Planificar: ' + (e.message || e));
     m.estado = 'instruccion'; guardarMision_(m);
@@ -681,6 +691,7 @@ function planificar_(chat, m) {
       'Cuando termines pulsa <b>✅ Ya envié todas</b>.' + avisoNo);
   }
   if (tipo === 'necesito_transcripcion' && !t.transcrito) {
+    if (!implementacionAlDia_(chat)) { m.estado = 'instruccion'; guardarMision_(m); return; }
     if (!compartir_(m.video_id, true)) {
       return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita Lisa en GitHub).\n<code>' +
         esc_(prop_('ULTIMO_ERROR_COMPARTIR', 'sin detalle')) + '</code>');
@@ -747,7 +758,8 @@ function describirPlan_(p, m, t) {
   if (p.subtitulos) l.push('• Subtítulos con lo que se dice' + ((t.segmentos || []).length ? '' : ' (⚠️ no hay transcripción con voz: no saldrán)') + '.');
   (p.textos || []).filter(x => x && x.texto).forEach(x => {
     const estilos = { titular: 'titular', rotulo: 'rótulo', simple: 'texto' };
-    l.push('• ' + (estilos[x.estilo] || 'Texto').replace(/^./, s => s.toUpperCase()) + ' ' + (x.posicion || 'arriba') + ': «' + esc_(x.texto) + '»' +
+    l.push('• ' + (estilos[x.estilo] || 'Texto').replace(/^./, s => s.toUpperCase()) + (x.animado === false ? ' fijo' : ' animado') + ' ' + (x.posicion || 'arriba') +
+      ': «' + esc_(x.texto) + '»' + (x.subtexto ? ' / «' + esc_(x.subtexto) + '»' : '') +
       (x.inicio !== undefined && x.fin !== undefined ? ' (' + mmss_(x.inicio) + '→' + mmss_(x.fin) + ')' : ''));
   });
   const im = p.imagenes || {};
@@ -759,9 +771,11 @@ function describirPlan_(p, m, t) {
       l.push('• Imágenes: ' + usar.length + ' de ' + n + ' (' + usar.join(', ') + ') ' + (estilos[im.estilo] || estilos.recuadro_flotante) +
         (im.posicion ? ', ' + im.posicion : '') + ', ' + ((im.tiempos || []).length
           ? 'en estos momentos: ' + im.tiempos.map(x => '#' + x.imagen + ' ' + mmss_(x.inicio) + '→' + mmss_(x.fin)).join(', ')
-          : 'repartidas a lo largo del video') + '.');
+          : 'repartidas a lo largo del video') + (im.retoque === false ? ', sin retoque' : ', con retoque fotográfico natural') + '.');
     }
   }
+  if (p.intro && p.intro.texto) l.push('• Intro animada: «' + esc_(p.intro.texto) + '»' + (p.intro.subtexto ? ' / «' + esc_(p.intro.subtexto) + '»' : '') + '.');
+  if (p.cierre) l.push('• Cierre animado con la firma de ' + esc_(prop_('NOMBRE_MEDIO', 'Torre Informativa')) + (p.cierre.texto ? ': «' + esc_(p.cierre.texto) + '»' : '') + '.');
   const f = p.fundido || {};
   if (Number(f.entrada) || Number(f.salida)) l.push('• Fundido: ' + [Number(f.entrada) ? 'entrada ' + f.entrada + ' s' : '', Number(f.salida) ? 'salida ' + f.salida + ' s' : ''].filter(Boolean).join(', ') + '.');
   const d = duracionSalida_(m, t);
@@ -777,7 +791,8 @@ function duracionSalida_(m, t) {
   const tramos = (p.tramos || []).filter(x => x && Number(x.fin) > Number(x.inicio));
   const base = tramos.length ? tramos.reduce((s, x) => s + Math.min(Number(x.fin), m.duracion_video || 1e9) - Number(x.inicio), 0) : (m.duracion_video || 0);
   const v = Math.max(0.25, Math.min(4, Number(p.velocidad) || 1));
-  return Math.round(base / v * 10) / 10;
+  const tarjetas = (p.intro && p.intro.texto ? Number(p.intro.segundos) || 3 : 0) + (p.cierre ? Number(p.cierre.segundos) || 3 : 0);
+  return Math.round((base / v + tarjetas) * 10) / 10;
 }
 
 /** Reel periodístico con lo que se dice: Lisa transcribe y Mandy interroga y escribe el guion. */
@@ -786,6 +801,7 @@ function elegirReel_(chat, m) {
   const t = leerTrabajo_(m);
   if (t.segmentos && t.segmentos.length) return iniciarInterrogatorio_(m, t.segmentos); // ya estaba transcrito
   if (t.transcrito) return preguntarInstruccion_(m, '🎧 <b>Lisa Davis</b>: este video no tiene voz, así que no puedo armar un reel con lo que se dice.');
+  if (!implementacionAlDia_(chat)) { m.estado = 'instruccion'; guardarMision_(m); return; }
   if (!compartir_(m.video_id, true)) {
     return enviar_(chat, '⚠️ No pude compartir el video por enlace (lo necesita el operador en GitHub).\n<code>' +
       esc_(prop_('ULTIMO_ERROR_COMPARTIR', 'sin detalle')) + '</code>');
@@ -876,6 +892,31 @@ function probarCompartir() {
   try { compartirApi_(f.getId(), false); Logger.log('Volver a privado: funciona ✅'); }
   catch (e) { Logger.log('Volver a privado: ERROR — ' + (e.message || e)); }
   Logger.log('Acceso final: ' + DriveApp.getFileById(f.getId()).getSharingAccess());
+}
+
+/**
+ * Lisa y Sonny leen el trabajo de la implementación PUBLICADA, no del código guardado.
+ * Si el código cambió y no se creó una "Nueva versión", el operador recibiría datos viejos.
+ * Esta revisión lo detecta antes de despachar y le explica al mando cómo arreglarlo.
+ */
+function implementacionAlDia_(chat) {
+  const cache = CacheService.getScriptCache();
+  if (cache.get('impl_ok_' + VERSION)) return true;
+  let publicada = '';
+  try {
+    const r = UrlFetchApp.fetch(prop_('URL_WEBAPP') + '?accion=version', { muteHttpExceptions: true, followRedirects: true });
+    try { publicada = String((JSON.parse(r.getContentText()) || {}).version || ''); } catch (e) { publicada = 'anterior'; }
+  } catch (e) {
+    console.error('No se pudo revisar la implementación: ' + (e.message || e));
+    return true; // si la revisión misma falla, no se frena la misión
+  }
+  if (publicada === VERSION) { cache.put('impl_ok_' + VERSION, '1', 21600); return true; }
+  enviar_(chat, '🛠 <b>Jason Hayes</b>: antes de mover al equipo, falta un paso en Apps Script.\n' +
+    'El código guardado es la versión <b>' + VERSION + '</b>, pero la implementación publicada es ' + (publicada ? 'la <b>' + esc_(publicada) + '</b>' : 'una anterior') + '. ' +
+    'Si sigo así, Lisa y Sonny recibirían el trabajo viejo.\n\n' +
+    '<b>Implementar → Administrar implementaciones → ✏️ → Versión: Nueva versión → Implementar</b>.\n' +
+    'Luego repite el último paso (el botón o tu mensaje). Tu misión sigue guardada.');
+  return false;
 }
 
 function despachar_(tipo, m) {
@@ -1067,6 +1108,9 @@ function promptGuion_(transcripcion, respuestas, duracion, ajustes) {
 }
 
 function aprobar_(chat, m, pidioMaestra) {
+  if (!implementacionAlDia_(chat)) {
+    return enviar_(chat, '✅ Cuando la publiques, apruébalo aquí.', [[{ text: '✅ Aprobar y editar', callback_data: pidioMaestra ? 'aprobar_maestra' : 'aprobar' }]]);
+  }
   const t = leerTrabajo_(m);
   const quiereMaestra = pidioMaestra || duracionSalida_(m, t) > 60;
   t.maestra_url = '';
@@ -1259,7 +1303,8 @@ function trabajoParaOperador_(m) {
     maestra_url: t.maestra_url || '',
     modo: m.modo || 'reel', imagenes: m.modo === 'plan' || m.modo === 'visual' ? (m.imagenes || []) : [], audio: m.audio || 'silencio',
     plan: t.plan || null, musica: m.modo === 'plan' && t.plan && t.plan.audio && t.plan.audio.musica ? (m.musica || '') : '',
-    conf: { color: prop_('COLOR_MARCA', '#E30613'), fuente: prop_('FUENTE', 'Liberation Sans'), segundos_titulo: prop_('SEGUNDOS_TITULO', '0') },
+    conf: { color: prop_('COLOR_MARCA', '#E30613'), fuente: prop_('FUENTE', 'Liberation Sans'), segundos_titulo: prop_('SEGUNDOS_TITULO', '0'),
+      medio: prop_('NOMBRE_MEDIO', 'Torre Informativa') },
   };
 }
 
@@ -1306,7 +1351,7 @@ function estadoSala_() {
     (s.agentes || {}).mando || { estado: 'espera', linea: 'Al mando.' });
   return {
     ok: true, sala: 'Sala de Edición IA', medio: prop_('NOMBRE_MEDIO', 'Torre Informativa'),
-    agentes: agentes, mision: s.mision || null, etapas: ETAPAS, bitacora: s.bitacora || [],
+    agentes: agentes, mision: s.mision || null, etapas: ETAPAS, bitacora: s.bitacora || [], version: VERSION,
     stats: s.stats || { reels: 0 }, actualizado: s.actualizado || Date.now(),
   };
 }

@@ -1,0 +1,22 @@
+{
+  "name": "sala-edicion-ia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Centro de Operaciones Bravo: sala virtual en vivo de la Sala de Edición IA",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}

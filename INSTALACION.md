@@ -57,7 +57,7 @@ Usa tu clave gratuita de Gemini (se crea en https://aistudio.google.com/apikey).
 
 5. En el editor, elige la función **configurar** y pulsa **Ejecutar**. En el registro aparecen dos valores: `SALA_CLAVE` y `SALA_API`. Cópialos.
 
-> **Importante:** si algún día cambias el código, actualiza la implementación existente (**Implementar → Administrar implementaciones → editar → Nueva versión**). Así la URL no cambia y no tienes que repetir los pasos 5 y 6.
+> **Importante:** cada vez que cambies el código, actualiza la implementación existente (**Implementar → Administrar implementaciones → ✏️ → Nueva versión**). Así la URL no cambia. Si se te olvida, Jason lo detecta y te avisa antes de mover al equipo.
 
 ## 5. Secretos en GitHub
 
@@ -72,16 +72,15 @@ En el repositorio: **Settings** → **Secrets and variables** → **Actions** �
 
 GitHub oculta los secretos en los registros públicos.
 
-## 6. Sala virtual en Vercel
+## 6. Sala virtual en Vercel (Next.js)
 
-1. En el repositorio, edita `sala/config.js` y pega la URL `/exec`:
-   ```js
-   window.SALA_API = "https://script.google.com/macros/s/.../exec";
-   ```
-2. En Vercel: **Add New → Project** → importa `sala-edicion-ia`.
-3. En *Root Directory* elige **sala**. *Framework Preset*: **Other**. Pulsa **Deploy**.
+La sala virtual es una app de **Next.js** en la carpeta `sala`. Ya trae la dirección `/exec` del Apps Script.
 
-Si dejas `config.js` vacío, la sala se muestra en modo demostración.
+1. Entra a https://vercel.com con tu cuenta de GitHub → **Add New… → Project** → importa `sala-edicion-ia`.
+2. En **Root Directory** elige **sala**. Vercel detecta **Next.js** solo. Pulsa **Deploy**.
+3. (Opcional) Si algún día cambia la dirección `/exec`, ponla en **Settings → Environment Variables** como `SALA_API` y vuelve a desplegar.
+
+La sala lee el estado cada 5 segundos por su propia ruta `/api/sala`, y solo muestra códigos y estados. Al pie aparece la versión del código publicada en Apps Script.
 
 ## 7. Primera misión
 
@@ -103,6 +102,8 @@ Si dejas `config.js` vacío, la sala se muestra en modo demostración.
 - **Material extra**: envía fotos (sueltas o en álbum) y audios de música de fondo antes o después del video.
 - Jason convierte tu orden en un **plan de edición** y te lo muestra antes de tocar nada. Si falta algo, pregunta; si pides algo que la sala no sabe hacer, te lo dice. Para corregir, escríbele o mándale una nota de voz con el cambio.
 - **Lo que Sonny sabe hacer**: elegir partes del video, cambiar velocidad, formato (vertical, cuadrado, original), color (blanco y negro, cálido, frío, contraste, vivo, brillo), quitar todo el sonido o bajarle el volumen, separar la voz de la música, música de fondo, subtítulos, titulares, rótulos y textos, imágenes (recuadro flotante, pantalla completa o esquina, repartidas o en momentos exactos), fundidos y logo.
+- **Gráficos animados (Remotion)**: titulares, rótulos (nombre y cargo), textos, intro y cierre con la firma del medio entran y salen animados. Si Remotion fallara, Sonny los pone fijos y entrega igual. Remotion es gratis para personas y empresas de hasta 3 empleados; un medio más grande necesita licencia (remotion.pro).
+- **Retoque fotográfico natural**: antes de animar tus fotos, Sonny corrige exposición, color, sombras y luces con valores suaves medidos en cada foto, sin tocar rostros ni piel. Pide *"sin retoque"* si no lo quieres.
 - **Lo que todavía no sabe hacer**: unir varios videos, generar imágenes o voces, traducir, ni quitar objetos de la imagen.
 - **Separar la voz de la música** usa Demucs, un modelo abierto que corre en GitHub; la primera vez tarda varios minutos más en instalarse.
 - En el modo reel, responde las preguntas de Mandy. Si no sabes algo, `/saltar`: quedará como *vacío de información*, nunca se inventa.

@@ -16,7 +16,7 @@ permissions:
 jobs:
   operar:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       MISION_ID: ${{ github.event.client_payload.mision_id }}
       SALA_API: ${{ secrets.SALA_API }}
@@ -32,6 +32,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        if: github.event.action == 'editar'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: operador/graficos/package-lock.json
 
       - name: Preparar herramientas (FFmpeg y tipografías)
         # Si el servidor de paquetes de Ubuntu se pone lento, se corta a los 10 minutos en vez de esperar media hora.
