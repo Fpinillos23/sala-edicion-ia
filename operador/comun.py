@@ -43,23 +43,31 @@ def reportar(mision_id, tipo, **datos):
     return False
 
 
-def descargar_drive(file_id, destino):
-    """Descarga un archivo de Drive compartido temporalmente por enlace."""
+def descargar_drive(file_id, destino, intentos=4):
+    """Descarga un archivo de Drive compartido temporalmente por enlace. Reintenta si la conexión se corta."""
     destino = Path(destino)
     url = "https://drive.usercontent.google.com/download"
-    with requests.get(url, params={"id": file_id, "export": "download", "confirm": "t"},
-                      stream=True, timeout=600) as r:
-        tipo = r.headers.get("Content-Type", "")
-        if r.status_code == 200 and "text/html" not in tipo:
-            with open(destino, "wb") as f:
-                for trozo in r.iter_content(1024 * 1024):
-                    f.write(trozo)
-            if destino.stat().st_size > 0:
-                return destino
+    ultimo = ""
+    for intento in range(intentos):
+        try:
+            with requests.get(url, params={"id": file_id, "export": "download", "confirm": "t"},
+                              stream=True, timeout=(30, 300)) as r:
+                tipo = r.headers.get("Content-Type", "")
+                if r.status_code == 200 and "text/html" not in tipo:
+                    with open(destino, "wb") as f:
+                        for trozo in r.iter_content(1024 * 1024):
+                            f.write(trozo)
+                    if destino.stat().st_size > 0:
+                        return destino
+                ultimo = f"Drive respondió {r.status_code}"
+        except (requests.RequestException, OSError) as e:
+            ultimo = type(e).__name__
+            print(f"   La descarga se cortó ({ultimo}); reintento {intento + 1} de {intentos}...")
+        time.sleep(8 * (intento + 1))
     # Respaldo: gdown resuelve los avisos de "archivo grande" de Drive
     subprocess.run(["gdown", "--quiet", "--id", file_id, "-O", str(destino)], check=False)
     if not destino.exists() or destino.stat().st_size == 0:
-        raise RuntimeError("No pude descargar un archivo de Drive (video o imagen). ¿Está compartido por enlace?")
+        raise RuntimeError(f"No pude descargar un archivo de Drive ({ultimo}). ¿Está compartido por enlace?")
     return destino
 
 

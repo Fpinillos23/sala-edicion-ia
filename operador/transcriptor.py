@@ -130,7 +130,13 @@ def _pedir_gemini(clave, modelo, audio_bytes):
     for m in modelos:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
         for intento in range(3):
-            r = requests.post(url, headers={"x-goog-api-key": clave}, json=cuerpo, timeout=300)
+            try:
+                r = requests.post(url, headers={"x-goog-api-key": clave}, json=cuerpo, timeout=(30, 300))
+            except requests.RequestException as e:  # conexión cortada o sin respuesta: se reintenta
+                ultimo = f"{type(e).__name__} en {m}"
+                print(f"   Se cortó la conexión con {m}; reintento en 20 segundos...")
+                time.sleep(20)
+                continue
             if r.status_code == 200:
                 texto = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 datos = json.loads(texto)
