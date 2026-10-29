@@ -155,13 +155,16 @@ def _pedir_gemini(clave, modelo, audio_bytes):
     raise RuntimeError(f"Gemini está saturado en este momento ({ultimo}). Reintenta en unos minutos.")
 
 
+TROZO_GEMINI = 120  # segundos por petición: trozos cortos responden rápido y Google no corta la conexión
+
+
 def transcribir_gemini(clave, video, carpeta_trabajo, modelo="gemini-3.8-flash"):
-    """Transcribe con Gemini en trozos de 10 minutos. Las marcas de tiempo llegan al segundo."""
+    """Transcribe con Gemini en trozos de 2 minutos. Las marcas de tiempo llegan al segundo."""
     carpeta_trabajo = Path(carpeta_trabajo)
     audio = carpeta_trabajo / "audio.mp3"
     print("   Extrayendo audio...")
     _ffmpeg(["-i", str(video), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", str(audio)])
-    _ffmpeg(["-i", "audio.mp3", "-f", "segment", "-segment_time", "600", "-c", "copy", "parte_%03d.mp3"],
+    _ffmpeg(["-i", "audio.mp3", "-f", "segment", "-segment_time", str(TROZO_GEMINI), "-c", "copy", "parte_%03d.mp3"],
             cwd=str(carpeta_trabajo))
     piezas = sorted(carpeta_trabajo.glob("parte_*.mp3")) or [audio]
 

@@ -21,29 +21,42 @@ def _transcribir(video, carpeta):
 
 
 def nota(mision_id, trabajo):
-    """Varios clips: transcribe los hablados y mide la duración de todos (también los apoyos)."""
+    """Varios clips: transcribe los hablados (3 a la vez) y mide la duración de todos (también los apoyos)."""
+    from concurrent.futures import ThreadPoolExecutor
     clips = trabajo.get("clips") or []
-    segmentos, duraciones, fallidos = {}, {}, []
-    for i, c in enumerate(clips, 1):
+    total = len(clips)
+
+    def uno(par):
+        i, c = par
         hablado = c.get("tipo") in ("entrada", "entrevista", "salida", "off", "sin_etiqueta")
-        for intento in range(2):  # si un clip falla, se reintenta una vez completo antes de seguir con los demás
+        for intento in range(2):  # si un clip falla, se reintenta una vez completo
             try:
-                comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {len(clips)}: descargando")
                 carpeta = Path(tempfile.mkdtemp(prefix=f"lisa_{i}_"))
                 ruta = comun.descargar_drive(c["id"], carpeta / "clip")
-                duraciones[str(i)] = round(duracion(ruta), 2)
-                if hablado:
-                    comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {len(clips)}: transcribiendo")
-                    segmentos[str(i)] = _transcribir(ruta, carpeta)
-                break
+                dur = round(duracion(ruta), 2)
+                if not hablado:
+                    return i, dur, None, True
+                comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {total}: transcribiendo")
+                segs = _transcribir(ruta, carpeta)
+                comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {total}: listo ({len(segs)} frases)")
+                return i, dur, segs, True
             except Exception as e:  # noqa: BLE001
-                print(f"   Clip {i}: falló ({type(e).__name__}).")
-                if intento == 1:
-                    fallidos.append(i)
-                    segmentos.setdefault(str(i), [])
-    if fallidos and len(fallidos) == len([c for c in clips if c.get("tipo") != "apoyo"]):
+                print(f"   Clip {i}: falló ({type(e).__name__}), intento {intento + 1}.")
+        return i, 0.0, [] if hablado else None, False
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        resultados = list(ex.map(uno, list(enumerate(clips, 1))))
+    segmentos, duraciones, fallidos = {}, {}, []
+    for i, dur, segs, ok in resultados:
+        duraciones[str(i)] = dur
+        if segs is not None:
+            segmentos[str(i)] = segs
+        if not ok:
+            fallidos.append(i)
+    hablados = [i for i, c in enumerate(clips, 1) if c.get("tipo") != "apoyo"]
+    if hablados and all(i in fallidos for i in hablados):
         raise RuntimeError(f"No pude transcribir ningún clip con voz (clips {', '.join(map(str, fallidos))}). Reintenta en unos minutos.")
-    print(f"   Nota transcrita: {len(clips)} clips, {len(fallidos)} con problemas.")
+    print(f"   Nota transcrita: {total} clips, {len(fallidos)} con problemas.")
     comun.reportar(mision_id, "transcripcion", agente="lisa", segmentos_por_clip=segmentos, duraciones=duraciones,
                    segmentos=[s for v in segmentos.values() for s in v], duracion=sum(duraciones.values()), fallidos=fallidos)
 

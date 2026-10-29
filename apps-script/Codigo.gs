@@ -28,7 +28,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-28.5';
+const VERSION = '2026-10-28.6';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -55,6 +55,7 @@ function configurar() {
     { command: 'estado', description: 'Cómo va la misión' },
     { command: 'drive', description: 'Usar un video de la carpeta de Drive' },
     { command: 'nota', description: 'Armar una nota con varios clips' },
+    { command: 'reintentar', description: 'Relanzar a Lisa o a Sonny si se quedaron atascados' },
     { command: 'saltar', description: 'Saltar una pregunta de Mandy' },
     { command: 'cancelar', description: 'Cancelar la misión actual' },
     { command: 'ayuda', description: 'Cómo funciona la sala' },
@@ -274,6 +275,7 @@ function telegram_(u) {
   if (/^\/cancelar/.test(texto)) return cancelar_(chat);
   if (/^\/drive/.test(texto)) return listarDrive_(chat);
   if (/^\/nota/.test(texto)) return iniciarNota_(chat, false);
+  if (/^\/reintentar/.test(texto)) return reintentarAtascada_(chat);
 
   if (msg.voice) return recibirNotaDeVoz_(chat, msg.voice);
   const foto = fotoDe_(msg);
@@ -1250,6 +1252,23 @@ function implementacionAlDia_(chat) {
   return false;
 }
 
+/** /reintentar: relanza al operador si la misión quedó esperando (por ejemplo, si GitHub cortó el trabajo). */
+function reintentarAtascada_(chat) {
+  const m = mision_();
+  if (!m || ['transcribiendo', 'editando', 'error'].indexOf(m.estado) < 0) {
+    return enviar_(chat, '🎖 <b>Jason Hayes</b>: no hay ningún trabajo de Lisa o Sonny pendiente para relanzar.');
+  }
+  if (!implementacionAlDia_(chat)) return;
+  const tipo = m.estado === 'editando' || (m.estado === 'error' && m.error_de === 'sonny') ? 'editar' : 'transcribir';
+  if (m.estado === 'error') m.estado = tipo === 'editar' ? 'editando' : 'transcribiendo';
+  if (tipo === 'transcribir' && m.modo === 'nota') m.flujo = 'nota';
+  guardarMision_(m);
+  compartirMaterial_(m, true);
+  despachar_(tipo, m);
+  salaEvento_(tipo === 'editar' ? 'sonny' : 'lisa', 'trabajando', 'Relanzado por el mando.', { mision: resumenSala_(m, tipo === 'editar' ? 6 : 2) });
+  enviar_(chat, '🔁 <b>Jason Hayes</b>: relancé a ' + (tipo === 'editar' ? '<b>Sonny Quinn</b>' : '<b>Lisa Davis</b>') + '. Te aviso cuando termine.');
+}
+
 function despachar_(tipo, m) {
   const r = UrlFetchApp.fetch('https://api.github.com/repos/' + prop_('GITHUB_REPO') + '/dispatches', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
@@ -1293,7 +1312,10 @@ function operador_(b) {
       compartirMaterial_(m, false);
       const frases = Object.keys(tn.segmentos_por_clip).reduce((s, k) => s + (tn.segmentos_por_clip[k] || []).length, 0);
       salaEvento_('lisa', 'listo', 'Clips transcritos.', { mision: resumenSala_(m, 3) });
-      enviar_(m.chat, '🎧 <b>Lisa Davis</b>: listo, ' + frases + ' frases en ' + (m.clips || []).length + ' clips. Jason arma la nota.');
+      const fallidos = (b.fallidos || []).map(Number).filter(Boolean);
+      enviar_(m.chat, '🎧 <b>Lisa Davis</b>: listo, ' + frases + ' frases en ' + (m.clips || []).length + ' clips. Jason arma la nota.' +
+        (fallidos.length ? '\n⚠️ No pude transcribir los clips ' + fallidos.join(', ') + ' (la conexión falló). Jason los tratará como clips sin texto; ' +
+          'si los necesitas con su texto, al final escribe /reintentar antes de aprobar.' : ''));
       return planificarNota_(m.chat, m);
     }
     if (m.flujo === 'plan') {
