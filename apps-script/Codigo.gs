@@ -29,7 +29,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-30.1';
+const VERSION = '2026-10-30.2';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -1620,8 +1620,11 @@ function operador_(b) {
     m.estado = 'lista'; m.reels = (m.reels || 0) + 1; guardarMision_(m);
     compartirMaterial_(m, false);
     guardarGuionEnDrive_(m);
-    const s = salaLeer_(); s.stats = s.stats || { reels: 0 }; s.stats.reels = (s.stats.reels || 0) + 1; salaGuardar_(s);
-    salaEvento_('sonny', 'listo', 'Reel entregado. Misión cumplida.', { mision: resumenSala_(m, 7) });
+    const s = salaLeer_(); s.stats = s.stats || { reels: 0 }; s.stats.reels = (s.stats.reels || 0) + 1;
+    // Minutos de cada misión (de la recepción a la entrega), para el promedio de la sala virtual
+    if (m.creada) s.stats.minutos = (s.stats.minutos || []).concat(Math.round((Date.now() - m.creada) / 60000)).slice(-20);
+    salaGuardar_(s);
+    salaEvento_('sonny', 'listo', (m.modo === 'nota' ? 'Nota entregada' : 'Reel entregado') + '. Misión cumplida.', { mision: resumenSala_(m, 7) });
     let maestra = '';
     if (b.maestra_id) maestra = '\n💾 Copia maestra (sin recomprimir, ' + (b.maestra_mb || '?') + ' MB): https://drive.google.com/file/d/' + b.maestra_id + '/view';
     else if (b.maestra_error) maestra = '\n⚠️ La copia maestra no se pudo guardar en Drive; el reel de Telegram sí está completo.';
@@ -2027,7 +2030,7 @@ function salaEvento_(agente, estado, linea, extra) {
 }
 
 function resumenSala_(m, etapa) {
-  return { codigo: m.codigo, etapa: etapa, etapaNombre: ETAPAS[etapa] || '', inicio: m.creada };
+  return { codigo: m.codigo, etapa: etapa, etapaNombre: ETAPAS[etapa] || '', inicio: m.creada, fin: etapa >= ETAPAS.length - 1 ? Date.now() : null };
 }
 
 function estadoSala_() {
