@@ -29,7 +29,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-30.2';
+const VERSION = '2026-10-30.3';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -1188,10 +1188,12 @@ function planificarNota_(chat, m) {
       '- Los rótulos con nombre y cargo de cada entrevistado los pone la sala sola en su primera aparición.\n' +
       '- "identificados": para cada clip de ENTREVISTA que no trae nombre en el inventario, si en alguna transcripción la persona dice su nombre ' +
       'o el periodista la presenta (ej. "nos acompaña el secretario de Salud, Juan Pérez"), devuelve {"clip": n, "nombre": "", "cargo": "", ' +
-      '"evidencia": "la frase COPIADA LITERALMENTE de la transcripción donde aparece el nombre"}. Si no se dice en el audio, no lo pongas: nunca adivines por la cara ni por el contexto.\n' +
+      '"evidencia": "SOLO la frase copiada literalmente de la transcripción donde aparece el nombre, sin comentarios ni comillas"}. Si no se dice en el audio, no lo pongas: nunca adivines por la cara ni por el contexto.\n' +
       '- Subtítulos: en las notas van ACTIVADOS ("subtitulos": true), porque muchos ven los videos sin sonido; solo van en false si el periodista lo pide.\n' +
       '- Titular: si el periodista no dio uno y no pidió nota sin titular, propón en "titular_sugerido" un titular corto (máximo 9 palabras) ' +
-      'que diga solo hechos que se escuchan en las transcripciones, sin adjetivos ni opiniones. No lo pongas en "textos": la sala lo ubica.\n' +
+      'que diga solo hechos que se escuchan en las transcripciones, sin adjetivos ni opiniones, en mayúsculas y minúsculas normales (tipo oración), ' +
+      'sin palabras de gancho como "exclusivo" o "última hora" y sin dos puntos. No lo pongas en "textos": la sala lo ubica.\n' +
+      '- Formato: "vertical" salvo que el periodista pida otro.\n' +
       '- Además puedes usar del plan de edición libre: ' + CAPACIDADES_PLAN.split('\n').filter(l => /formato|velocidad|color|audio|subtitulos|textos|intro|cierre|fundido|logo|imagenes/.test(l) && !/tramos/.test(l)).join(' ') + '\n' +
       'Duración: si el periodista no dice, apunta a entre 60 y 120 segundos.\n' +
       'Reglas: nunca inventes textos (titulares solo con palabras del periodista o literales de la transcripción); si algo esencial es ambiguo, ' +
@@ -1248,15 +1250,35 @@ function norm_(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/** Titular sobrio: sin "EXCLUSIVO:" ni mayúsculas sostenidas; los nombres propios conservan su mayúscula. */
+function titularSobrio_(txt, m, t) {
+  let x = String(txt || '').replace(/["«»“”]/g, '').replace(/\s+/g, ' ').trim();
+  x = x.replace(/^[^:]{2,30}:\s+/, '');                       // "LANZAMIENTO EXCLUSIVO: …" → "…"
+  x = x.replace(/\b(exclusiv[oa]|[uú]ltima hora|impactante|incre[ií]ble|urgente)\b/gi, '').replace(/\s+/g, ' ').trim();
+  const letras = x.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+  if (letras && letras.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length / letras.length > 0.6) {
+    // Estaba todo en mayúsculas: tipo oración, devolviendo la mayúscula a los nombres propios conocidos
+    const propios = {};
+    const fuente = (m.clips || []).map(c => c.persona || '').join(' ') + ' ' +
+      Object.keys(t.segmentos_por_clip || {}).map(k => (t.segmentos_por_clip[k] || []).map(s => s.texto).join(' ')).join(' ');
+    (fuente.match(/[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+/g) || []).forEach(w => { propios[w.toLowerCase()] = w; });
+    x = x.toLowerCase().split(' ').map(w => propios[w] || w).join(' ');
+    x = x.charAt(0).toUpperCase() + x.slice(1);
+  }
+  return x.replace(/[.:;,]+$/, '').trim();
+}
+
 /** Lo que necesita quien ve la nota sin sonido: subtítulos, titular y el nombre de cada entrevistado. */
 function completarTextosNota_(m, t, p, r) {
   const instr = String(m.instruccion || '');
+  // Formato: las notas son para redes (vertical), salvo que el periodista pida otro
+  if (p.formato !== 'vertical' && p.formato !== 'vertical_recorte' && !/horizontal|original|cuadrad|16:9|youtube|1:1/i.test(instr)) p.formato = 'vertical';
   // Subtítulos activados, salvo que el periodista haya hablado de subtítulos y Jason los haya quitado
   p.subtitulos = p.subtitulos === false && /subt[ií]tulo/i.test(instr) ? false : true;
   // Titular propuesto por Jason (solo hechos del audio), si no hay uno y no se pidió nota sin titular
   p.textos = (p.textos || []).filter(x => x && String(x.texto || '').trim());
   const hayTitular = p.textos.some(x => x.estilo === 'titular') || (p.intro && String(p.intro.texto || '').trim());
-  const sug = String((r && r.titular_sugerido) || '').replace(/["«»“”]/g, '').trim();
+  const sug = titularSobrio_(String((r && r.titular_sugerido) || ''), m, t);
   m.titular_propuesto = '';
   if (!hayTitular && sug && sug.split(/\s+/).length <= 12 && !/(sin|no\b.{0,20})\s*titular/i.test(instr)) {
     const total = (p.bloques || []).reduce((s, b) => s + (Number(b.fin) - Number(b.inicio)), 0);
@@ -1267,10 +1289,14 @@ function completarTextosNota_(m, t, p, r) {
   const todo = ' ' + Object.keys(t.segmentos_por_clip || {}).map(k => (t.segmentos_por_clip[k] || []).map(x => x.texto).join(' ')).map(norm_).join(' ') + ' ';
   ((r && r.identificados) || []).forEach(x => {
     const c = (m.clips || [])[Number(x && x.clip) - 1];
-    const nombre = String((x && x.nombre) || '').trim(), ev = norm_(x && x.evidencia);
-    if (!c || c.tipo !== 'entrevista' || c.persona || !nombre || ev.length < 12) return;
+    const nombre = String((x && x.nombre) || '').trim(), crudo = String((x && x.evidencia) || '');
+    if (!c || c.tipo !== 'entrevista' || c.persona || !nombre) return;
     const apellido = norm_(nombre).split(' ').filter(w => w.length > 2);
-    if (todo.indexOf(' ' + ev + ' ') < 0 || !apellido.length || !apellido.every(w => (' ' + ev + ' ').indexOf(' ' + w + ' ') >= 0)) return;
+    // La evidencia puede venir con comentario ("El testimonio dice: 'Soy …'"): vale la frase completa o lo que esté entre comillas
+    const candidatas = [crudo].concat((crudo.match(/["'«“‘][^"'»”’]{8,}["'»”’]/g) || []).map(q => q.slice(1, -1))).map(norm_);
+    const ev = candidatas.find(e => e.length >= 12 && todo.indexOf(' ' + e + ' ') >= 0 &&
+      apellido.length && apellido.every(w => (' ' + e + ' ').indexOf(' ' + w + ' ') >= 0));
+    if (!ev) return;
     c.persona = nombre.slice(0, 60); c.cargo = String(x.cargo || '').trim().slice(0, 80); c.detectado = true;
   });
 }
