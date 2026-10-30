@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from editor import _color_ass, _ffmpeg, _filtro, _limpio, _t, _tam_imagen, frases_subtitulo, info_video
+from editor import NORMA_AUDIO, _color_ass, _ffmpeg, _filtro, _limpio, _t, _tam_imagen, estilo_reel, eventos_reel, frases_subtitulo, info_video
 
 FILTROS_COLOR = {
     "blanco_negro": "hue=s=0",
@@ -72,6 +72,7 @@ def validar(plan, duracion, n_imagenes, hay_musica):
                   "musica": bool(audio.get("musica")) and hay_musica,
                   "volumen_musica": _num(audio.get("volumen_musica"), 0.35, 0.0, 2.0)}
     p["subtitulos"] = bool(p.get("subtitulos"))
+    p["estilo_subtitulos"] = "clasico" if str(p.get("estilo_subtitulos") or "") == "clasico" else "reel"
     total = sum(t["fin"] - t["inicio"] for t in p["tramos"]) / p["velocidad"]
     textos = []
     for x in p.get("textos") or []:
@@ -198,6 +199,7 @@ def _escribir_ass(ruta, p, frases, tam, conf, hay_subs=False):
         f"Style: titular,{fuente},{round(70 * k)},&H00FFFFFF,&H00FFFFFF,{marca},{marca},-1,0,0,0,100,100,0,0,3,{round(14 * k)},0,8,{round(80 * k)},{round(80 * k)},0,1",
         f"Style: rotulo,{fuente},{round(54 * k)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,3,{round(12 * k)},0,2,{round(60 * k)},{round(60 * k)},0,1",
         f"Style: simple,{fuente},{round(62 * k)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,{max(3, round(5 * k))},1,8,{round(70 * k)},{round(70 * k)},0,1",
+        estilo_reel(fuente, tam),
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     for x in p["textos"]:
@@ -206,8 +208,11 @@ def _escribir_ass(ruta, p, frases, tam, conf, hay_subs=False):
             texto = texto.upper()
         lineas.append(f"Dialogue: 1,{_t(x['inicio'])},{_t(x['fin'])},{x['estilo']},,0,0,{margen[x['posicion']]},,"
                       f"{{\\an{alin[x['posicion']]}}}{texto}")
-    for ini, fin, texto in frases:
-        lineas.append(f"Dialogue: 0,{_t(ini)},{_t(fin)},Sub,,0,0,0,,{_limpio(texto)}")
+    if p.get("estilo_subtitulos", "reel") == "reel":
+        lineas += eventos_reel(frases, tam)
+    else:
+        for ini, fin, texto in frases:
+            lineas.append(f"Dialogue: 0,{_t(ini)},{_t(fin)},Sub,,0,0,0,,{_limpio(texto)}")
     Path(ruta).write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
 
@@ -411,13 +416,20 @@ def renderizar_plan(video, plan, imagenes, musica, segmentos, carpeta_trabajo, d
         fin_m = max(0.0, total - 1.5)
         partes.append(f"[{idx}:a]aresample=48000,volume={p['audio']['volumen_musica']:.2f},atrim=0:{total:.2f},"
                       f"afade=t=out:st={fin_m:.2f}:d=1.5[mus]")
-        partes.append("[voz][mus]amix=inputs=2:duration=first:normalize=0[mix]")
+        if vol > 0:  # la música se agacha cuando alguien habla (compresión con la voz como guía)
+            partes.append("[voz]asplit=2[voz1][vozguia]")
+            partes.append("[mus][vozguia]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=350:makeup=1[musb]")
+            partes.append("[voz1][musb]amix=inputs=2:duration=first:normalize=0[mix]")
+        else:
+            partes.append("[voz][mus]amix=inputs=2:duration=first:normalize=0[mix]")
         pista = "mix"
     fa = []
     if fe:
         fa.append(f"afade=t=in:st=0:d={fe:.2f}")
     if fs:
         fa.append(f"afade=t=out:st={max(0.0, total - fs):.2f}:d={fs:.2f}")
+    if not (p["audio"]["modo"] == "silencio" and not p["audio"]["musica"]):
+        fa.insert(0, NORMA_AUDIO)  # todo sale al volumen estándar de redes (-14 LUFS)
     partes.append(f"[{pista}]{','.join(fa) if fa else 'anull'}[afin]")
 
     (trabajo / "filtro.txt").write_text(";\n".join(partes), encoding="utf-8")

@@ -76,10 +76,19 @@ jobs:
                   "textos": [{"texto": "Obras en el Guatapurí", "estilo": "titular", "posicion": "arriba", "inicio": 0, "fin": 6}]}
           seg = {"2": [{"inicio": 1.5, "fin": 4, "texto": "estamos trabajando en la obra"}], "5": [{"inicio": 0.5, "fin": 3, "texto": "voz en off"}]}
           conf = {"fuente": "Liberation Sans", "color": "#E30613", "medio": "Torre Informativa", "logo": ""}
-          total = renderizar_nota(rutas, clips, plan, [], None, seg, N, f"{N}/nota.mp4", conf)
+          borradores = []
+          total = renderizar_nota(rutas, clips, plan, [], None, seg, N, f"{N}/nota.mp4", conf,
+                                  borrador=lambda r, d: borradores.append(round(d, 1)))
           print("NOTA", round(total, 1), info_video(f"{N}/nota.mp4"))
+          from revisor import revisar
+          rv = revisar(f"{N}/nota.mp4", total, True, (1080, 1920))
+          print("REVISION", rv, "BORRADOR", borradores)
+          assert borradores, "no se generó el borrador"
+          assert rv["lufs"] is not None and -15.5 < rv["lufs"] < -12.5, f"volumen fuera de rango: {rv['lufs']}"
+          from transcriptor import describir_apoyo
+          print("APOYO", describir_apoyo("", "x", f"{N}/apoyo1.mp4", N))
           PY
-          grep -E "NOTA|Error|error|animación" /tmp/n/log.txt | while read -r l; do echo "::warning::$l"; done
+          grep -E "NOTA|REVISION|APOYO|Error|error|animación" /tmp/n/log.txt | while read -r l; do echo "::warning::$l"; done
           negros=$(ffmpeg -hide_banner -i /tmp/n/nota.mp4 -vf "trim=5.9:13.2,scale=8:8,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG" -f null - 2>&1 | grep -o "YAVG=[0-9.]*" | awk -F= '$2<25{c++} END{print c+0}')
           echo "::warning::cuadros negros en el off: $negros"
           test "$negros" = "0"

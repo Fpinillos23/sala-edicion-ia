@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: operador/requirements.txt
 
       - uses: actions/setup-node@v4
         if: github.event.action == 'editar'
@@ -39,6 +41,13 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: operador/graficos/package-lock.json
+
+      # Guarda Remotion ya instalado (y su navegador) entre misiones: Sonny no lo reinstala cada vez
+      - uses: actions/cache@v4
+        if: github.event.action == 'editar'
+        with:
+          path: operador/graficos/node_modules
+          key: remotion-${{ runner.os }}-${{ hashFiles('operador/graficos/package-lock.json') }}
 
       - name: Preparar herramientas (FFmpeg y tipografías)
         # Si el servidor de paquetes de Ubuntu se pone lento, se corta a los 10 minutos en vez de esperar media hora.

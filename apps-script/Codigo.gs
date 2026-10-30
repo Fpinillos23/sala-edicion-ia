@@ -16,6 +16,7 @@ const AGENTES = {
   lisa:  { nombre: 'Lisa Davis',  alias: 'Inteligencia', rol: 'Transcribe el material' },
   mandy: { nombre: 'Mandy Ellis', alias: 'Enlace', rol: 'Guion de reels de entrevistas' },
   sonny: { nombre: 'Sonny Quinn', alias: 'Bravo 3', rol: 'Edita y entrega el video' },
+  ray:   { nombre: 'Ray Perry',   alias: 'Bravo 2', rol: 'Control de calidad' },
 };
 
 const FORMATOS = {
@@ -28,7 +29,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-28.6';
+const VERSION = '2026-10-29.1';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -56,6 +57,7 @@ function configurar() {
     { command: 'drive', description: 'Usar un video de la carpeta de Drive' },
     { command: 'nota', description: 'Armar una nota con varios clips' },
     { command: 'reintentar', description: 'Relanzar a Lisa o a Sonny si se quedaron atascados' },
+    { command: 'estilo', description: 'Ver o cambiar el manual de estilo' },
     { command: 'saltar', description: 'Saltar una pregunta de Mandy' },
     { command: 'cancelar', description: 'Cancelar la misión actual' },
     { command: 'ayuda', description: 'Cómo funciona la sala' },
@@ -276,6 +278,12 @@ function telegram_(u) {
   if (/^\/drive/.test(texto)) return listarDrive_(chat);
   if (/^\/nota/.test(texto)) return iniciarNota_(chat, false);
   if (/^\/reintentar/.test(texto)) return reintentarAtascada_(chat);
+  if (/^\/estilo/i.test(texto)) return comandoEstilo_(chat, texto);
+  if (/^\/redaccion/i.test(texto)) {
+    const mr = mision_();
+    if (!mr || mr.estado !== 'lista' || !tieneTexto_(mr)) return enviar_(chat, '📰 No hay una misión terminada con texto para pasar a la Sala de Redacción.');
+    return pedirSeccionRedaccion_(chat, mr);
+  }
 
   if (msg.voice) return recibirNotaDeVoz_(chat, msg.voice);
   const foto = fotoDe_(msg);
@@ -366,6 +374,11 @@ function boton_(q) {
     m.ajustes = ''; m.estado = 'duracion'; guardarMision_(m);
     return pedirDuracion_(chat, m);
   }
+  if (d === 'redaccion' && m.estado === 'lista') return pedirSeccionRedaccion_(chat, m);
+  if (d.indexOf('red:') === 0 && m.estado === 'lista') {
+    if (d === 'red:no') return enviar_(chat, 'Entendido. Si luego la quieres pasar, escribe /redaccion mientras la misión siga abierta.');
+    return enviarARedaccion_(chat, m, d.slice(4));
+  }
   if (d === 'cerrar' && m.estado === 'lista') {
     m.estado = 'cerrada'; guardarMision_(m);
     salaEvento_('jason', 'espera', 'Misión cerrada. Esperando nuevo material.', { mision: null });
@@ -394,6 +407,7 @@ function bienvenida_(chat) {
     '<i>"del segundo 10 al 40, en blanco y negro, con el titular Festival Vallenato"</i>, <i>"un reel de 45 segundos con lo que dice el alcalde"</i>.',
     '   🖼 Fotos y 🎵 música de fondo: envíamelas antes o después del video.',
     '   Te muestro el plan de edición antes de tocar nada. Si algo no lo sé hacer, te lo digo.',
+    '📘 /estilo: el manual de estilo que la sala aprende de tus pedidos. 📰 Al terminar, puedes pasar el material a la Sala de Redacción.',
     '🧩 <b>Nota con varios clips</b>: escribe /nota y mándame los clips con su etiqueta (<code>entrada</code>, <code>entrevista: Nombre, cargo</code>, <code>apoyo</code>, <code>off</code>, <code>salida</code>). Lisa los transcribe, yo armo la escaleta con los apoyos encima y Sonny la monta.',
     '3. Tú apruebas o pides cambios.',
     '4. <b>Sonny Quinn</b> edita y te entrega el video aquí mismo.',
@@ -731,7 +745,7 @@ function planificar_(chat, m) {
       'Devuelve este JSON:\n{"tipo": "plan" | "reel" | "preguntar" | "necesito_imagenes" | "necesito_transcripcion", ' +
       '"entendido": "una o dos frases, en segunda persona, de lo que vas a hacer", "preguntas": [], "no_se_puede": [], ' +
       '"plan": {"formato": "", "tramos": [], "velocidad": 1, "color": {}, "audio": {}, "subtitulos": false, "textos": [], "imagenes": {}, ' +
-      '"intro": null, "cierre": null, "fundido": {}, "logo": true}}');
+      '"intro": null, "cierre": null, "fundido": {}, "logo": true}, ' + PIDE_REGLAS + '}');
   } catch (e) {
     console.error('Planificar: ' + (e.message || e));
     m.estado = 'instruccion'; guardarMision_(m);
@@ -739,6 +753,7 @@ function planificar_(chat, m) {
       'Repíteme la instrucción en un minuto.', [[{ text: '❌ Cancelar', callback_data: 'cancelar' }]]);
   }
   r = r || {};
+  aprenderReglas_(chat, r.reglas_nuevas);
   const tipo = r.tipo;
   const noSe = (r.no_se_puede || []).map(String).filter(Boolean);
   const avisoNo = noSe.length ? '\n\n🚫 <b>Esto no lo sé hacer</b>:\n' + noSe.map(x => '• ' + esc_(x)).join('\n') : '';
@@ -791,8 +806,56 @@ function planificar_(chat, m) {
 function iaJason_(usuario) {
   const sistema = 'Eres JASON HAYES, coordinador de la sala de edición de video de ' + prop_('NOMBRE_MEDIO', 'Torre Informativa') +
     ', un medio periodístico. Conviertes las instrucciones del periodista en planes de edición ejecutables. ' +
-    'Escribes en español de Colombia. Responde siempre en JSON válido, sin texto fuera del JSON.';
-  return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario) : groq_(sistema, usuario);
+    'Escribes en español de Colombia. Responde siempre en JSON válido, sin texto fuera del JSON.' + textoManual_();
+  return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario, { rapido: true }) : groq_(sistema, usuario);
+}
+
+// ───────────────────────── Manual de estilo: lo que el mando enseña queda para siempre ─────────────────────────
+
+const PIDE_REGLAS = '"reglas_nuevas": [] // SOLO preferencias GENERALES y duraderas que el periodista expresó en sus instrucciones y que ' +
+  'aplicarían a cualquier video futuro (ej. "los titulares siempre van arriba", "nunca música en notas judiciales", "subtítulos en todos los reels"). ' +
+  'No incluyas detalles de este video (tiempos, nombres, este titular). Lista vacía si no hay.';
+
+function manual_() { try { return JSON.parse(prop_('MANUAL_ESTILO', '[]')) || []; } catch (e) { return []; } }
+function guardarManual_(lista) { P_().setProperty('MANUAL_ESTILO', JSON.stringify(lista.slice(-30))); }
+
+function textoManual_() {
+  const l = manual_();
+  return l.length ? '\n\nMANUAL DE ESTILO DE LA CASA (reglas que el periodista ya fijó; aplícalas siempre, salvo que ahora pida otra cosa):\n' +
+    l.map(x => '- ' + x.regla).join('\n') : '';
+}
+
+/** Guarda las reglas nuevas que detectó la IA y se lo cuenta al mando para que pueda borrarlas. */
+function aprenderReglas_(chat, reglas) {
+  const actual = manual_();
+  const norm = x => String(x || '').toLowerCase().replace(/[^a-záéíóúñü0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  const vistas = actual.map(x => norm(x.regla));
+  const nuevas = (reglas || []).map(x => String(x || '').trim()).filter(x => x.length >= 8 && x.length <= 200 && vistas.indexOf(norm(x)) < 0).slice(0, 3);
+  if (!nuevas.length) return;
+  guardarManual_(actual.concat(nuevas.map(x => ({ regla: x, t: Date.now() }))));
+  enviar_(chat, '📘 <b>Jason Hayes</b>: lo anoté en el manual de estilo para las próximas misiones:\n' + nuevas.map(x => '• ' + esc_(x)).join('\n') +
+    '\nEscribe /estilo para ver el manual o borrar una regla.');
+}
+
+/** /estilo, /estilo agregar …, /estilo borrar N, /estilo borrar todo */
+function comandoEstilo_(chat, texto) {
+  const resto = texto.replace(/^\/estilo\s*/i, '').trim();
+  let l = manual_();
+  let r;
+  if ((r = resto.match(/^agregar\s+(.+)$/i))) {
+    l.push({ regla: r[1].slice(0, 200), t: Date.now() }); guardarManual_(l);
+    return enviar_(chat, '📘 Agregada al manual: <i>' + esc_(r[1]) + '</i>');
+  }
+  if (/^borrar\s+todo$/i.test(resto)) { guardarManual_([]); return enviar_(chat, '📘 Manual de estilo vacío.'); }
+  if ((r = resto.match(/^borrar\s+(\d+)$/i))) {
+    const i = parseInt(r[1], 10) - 1;
+    if (!l[i]) return enviar_(chat, '⚠️ No hay una regla número ' + (i + 1) + '.');
+    const quitada = l.splice(i, 1)[0]; guardarManual_(l);
+    return enviar_(chat, '📘 Borrada: <i>' + esc_(quitada.regla) + '</i>');
+  }
+  enviar_(chat, '📘 <b>Manual de estilo</b> (Jason, Mandy y Sonny lo aplican en cada misión)\n' +
+    (l.length ? l.map((x, i) => (i + 1) + '. ' + esc_(x.regla)).join('\n') : '<i>Todavía vacío. Se llena solo con tus pedidos.</i>') +
+    '\n\nPara cambiarlo: <code>/estilo agregar …</code> · <code>/estilo borrar 2</code> · <code>/estilo borrar todo</code>');
 }
 
 /** Texto del plan escrito por el código (no por la IA), para que lo que apruebas sea exactamente lo que Sonny hará. */
@@ -1057,6 +1120,10 @@ function planificarNota_(chat, m) {
       const txt = transcripcionTexto_((t.segmentos_por_clip || {})[k] || []).slice(0, Math.max(0, resto));
       resto -= txt.length;
       linea += '\n' + (txt || '(sin voz)');
+    } else {
+      const v = (t.apoyos || {})[k];
+      if (v) linea += (v.descripcion ? ' · se ve: ' + v.descripcion : '') + (v.calidad ? ' · calidad: ' + v.calidad : '') +
+        (v.plano ? ' · plano ' + v.plano : '') + (v.usable === false ? ' · NO USABLE' : '');
     }
     return linea;
   }).join('\n\n');
@@ -1077,13 +1144,15 @@ function planificarNota_(chat, m) {
       'Úsalos sobre la voz en off (allí son obligatorios: el off no tiene imagen propia) y, con medida, sobre partes largas de entrevistas, ' +
       'pero deja ver la cara del entrevistado al menos los primeros 3 segundos de cada bloque suyo. No tapes la entrada ni la salida salvo que lo pidan. ' +
       'Si no alcanzas a cubrir todo el off, la sala lo rellena sola con los apoyos.\n' +
+      '- Elige cada apoyo por lo que SE VE (dato "se ve" de cada clip de apoyo) para que ilustre lo que se dice en ese momento. ' +
+      'Nunca uses los marcados NO USABLE y, si hay alternativas, evita los de calidad movida, oscura o desenfocada.\n' +
       '- Los rótulos con nombre y cargo de cada entrevistado los pone la sala sola en su primera aparición.\n' +
       '- Además puedes usar del plan de edición libre: ' + CAPACIDADES_PLAN.split('\n').filter(l => /formato|velocidad|color|audio|subtitulos|textos|intro|cierre|fundido|logo|imagenes/.test(l) && !/tramos/.test(l)).join(' ') + '\n' +
       'Duración: si el periodista no dice, apunta a entre 60 y 120 segundos.\n' +
       'Reglas: nunca inventes textos (titulares solo con palabras del periodista o literales de la transcripción); si algo esencial es ambiguo, ' +
       'tipo "preguntar" con máximo 3 preguntas; lo que no se pueda hacer va en "no_se_puede".\n\n' +
       'Devuelve este JSON:\n{"tipo": "plan" | "preguntar", "entendido": "una o dos frases, en segunda persona", "preguntas": [], "no_se_puede": [], ' +
-      '"plan": {"formato": "vertical", "bloques": [], "tapas": [], "textos": [], "subtitulos": false, "audio": {}, "intro": null, "cierre": null, "fundido": {}, "logo": true}}');
+      '"plan": {"formato": "vertical", "bloques": [], "tapas": [], "textos": [], "subtitulos": false, "audio": {}, "intro": null, "cierre": null, "fundido": {}, "logo": true}, ' + PIDE_REGLAS + '}');
   } catch (e) {
     console.error('Planificar nota: ' + (e.message || e));
     m.estado = 'indicaciones'; guardarMision_(m);
@@ -1091,6 +1160,7 @@ function planificarNota_(chat, m) {
       'Repíteme la indicación en un minuto o pulsa el botón.', [[{ text: '▶️ Ármala con tu criterio', callback_data: 'nota:armar' }]]);
   }
   r = r || {};
+  aprenderReglas_(chat, r.reglas_nuevas);
   const noSe = (r.no_se_puede || []).map(String).filter(Boolean);
   const avisoNo = noSe.length ? '\n\n🚫 <b>Esto no lo sé hacer</b>:\n' + noSe.map(x => '• ' + esc_(x)).join('\n') : '';
   if (r.tipo === 'preguntar' || !r.plan) {
@@ -1269,6 +1339,69 @@ function reintentarAtascada_(chat) {
   enviar_(chat, '🔁 <b>Jason Hayes</b>: relancé a ' + (tipo === 'editar' ? '<b>Sonny Quinn</b>' : '<b>Lisa Davis</b>') + '. Te aviso cuando termine.');
 }
 
+// ───────────────────────── Puente con la Sala de Redacción (Robin, Vivi, Usopp, Nami, Brook y Luffy) ─────────────────────────
+
+const SHEET_REDACCION = '1X4SQeHEcYMVP4-tHCESFobn2_qEX4xd6Kj14-knAgB8'; // hoja de la Sala de Redacción (se puede cambiar con la propiedad SHEET_REDACCION)
+
+function tieneTexto_(m) {
+  const t = leerTrabajo_(m);
+  if ((t.segmentos || []).length) return true;
+  const spc = t.segmentos_por_clip || {};
+  return Object.keys(spc).some(k => (spc[k] || []).length);
+}
+
+function pedirSeccionRedaccion_(chat, m) {
+  enviar_(chat, '📰 <b>Jason Hayes</b>: le paso a la Sala de Redacción la transcripción' + (m.modo === 'nota' ? ' de todos los clips, con quién habla en cada uno,' : '') +
+    ' y tus indicaciones. El reportero escribe la nota web, Nami la verifica, Brook hace el post de Instagram y Luffy te la manda por el bot de redacción.\n¿En qué sección va?',
+    [[{ text: '⚖️ Judicial (Robin)', callback_data: 'red:judicial' }, { text: '🏛 Política (Vivi)', callback_data: 'red:politica' }],
+      [{ text: '🏘 Valledupar y comunidad (Usopp)', callback_data: 'red:comunidad' }], [{ text: '❌ Ahora no', callback_data: 'red:no' }]]);
+}
+
+/** Arma los hechos con las transcripciones y los deja como una fila nueva en la hoja "Entradas" de la Sala de Redacción. */
+function enviarARedaccion_(chat, m, seccion) {
+  const t = leerTrabajo_(m);
+  const etiqueta = { entrada: 'Entrada del periodista', off: 'Voz en off del periodista', salida: 'Salida del periodista', sin_etiqueta: 'Clip' };
+  const bloques = [];
+  if (m.modo === 'nota') {
+    (m.clips || []).forEach((c, i) => {
+      const segs = (t.segmentos_por_clip || {})[String(i + 1)] || [];
+      if (!segs.length) return;
+      const quien = c.tipo === 'entrevista' ? 'Entrevista' + (c.persona ? ' – ' + c.persona + (c.cargo ? ', ' + c.cargo : '') : ' (persona sin identificar)') : etiqueta[c.tipo] || 'Clip';
+      bloques.push('[' + quien + ']: ' + segs.map(x => x.texto).join(' '));
+    });
+  } else {
+    bloques.push('[Video]: ' + (t.segmentos || []).map(x => x.texto).join(' '));
+    (m.respuestas || []).filter(x => x.r).forEach(x => bloques.push('[Dato del editor] ' + x.p + ' → ' + x.r));
+  }
+  if (!bloques.length) return enviar_(chat, '⚠️ Esta misión no tiene texto transcrito para pasar a la Sala de Redacción.');
+  const hechos = ('INFORMACIÓN DEL EDITOR (reportería propia de Torre Informativa grabada en video; transcripciones automáticas de la Sala de Edición IA: ' +
+    'pueden traer errores de transcripción, corrígelos sin cambiar el sentido; las personas sin identificar no se nombran). ' +
+    (m.titulo ? 'Titular usado en el video: ' + m.titulo + '. ' : '') +
+    (m.instruccion ? 'Indicaciones del editor para el video: ' + m.instruccion.replace(/\n/g, ' ') + '. ' : '') +
+    'TRANSCRIPCIONES: ' + bloques.join(' ||| ')).slice(0, 45000);
+  try {
+    const hoja = SpreadsheetApp.openById(prop_('SHEET_REDACCION', SHEET_REDACCION)).getSheetByName('Entradas');
+    if (!hoja) throw new Error('la hoja no tiene la pestaña "Entradas"');
+    hoja.appendRow([Utilities.formatDate(new Date(), 'America/Bogota', 'yyyy-MM-dd'), seccion, hechos,
+      'Reportería propia en video (Sala de Edición IA, ' + m.codigo + ')', 'Fabián Pinillos (Sala de Edición)', '']);
+  } catch (e) {
+    return enviar_(chat, '⚠️ No pude dejar la nota en la Sala de Redacción: <code>' + esc_(String(e.message || e)).slice(0, 200) + '</code>\n' +
+      'Revisa que esta cuenta de Google pueda editar la hoja de la Sala de Redacción (en Apps Script ejecuta <b>probarSalaRedaccion</b>).');
+  }
+  m.enviada_redaccion = Date.now(); guardarMision_(m);
+  salaEvento_('jason', 'listo', 'Material enviado a la Sala de Redacción.', { mision: resumenSala_(m, 7) });
+  enviar_(chat, '📰 <b>Jason Hayes</b>: listo, quedó en la Sala de Redacción (sección ' + seccion + '). En unos minutos te llega la nota web y el post por el bot de redacción.',
+    [[{ text: '✅ Cerrar misión', callback_data: 'cerrar' }]]);
+}
+
+/** Ejecútala una vez desde el editor: autoriza el acceso a la hoja de la Sala de Redacción y comprueba que se pueda leer. */
+function probarSalaRedaccion() {
+  const ss = SpreadsheetApp.openById(prop_('SHEET_REDACCION', SHEET_REDACCION));
+  const hoja = ss.getSheetByName('Entradas');
+  Logger.log('Hoja: ' + ss.getName() + ' · pestaña Entradas: ' + (hoja ? 'sí, ' + hoja.getLastRow() + ' filas' : 'NO EXISTE'));
+  if (hoja) Logger.log('Encabezados: ' + hoja.getRange(1, 1, 1, 6).getDisplayValues()[0].join(' | '));
+}
+
 function despachar_(tipo, m) {
   const r = UrlFetchApp.fetch('https://api.github.com/repos/' + prop_('GITHUB_REPO') + '/dispatches', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
@@ -1285,10 +1418,10 @@ function despachar_(tipo, m) {
 function operador_(b) {
   const m = mision_();
   if (!m || m.id !== b.mision_id || LIBRES.indexOf(m.estado) >= 0 && b.tipo !== 'listo') return; // misión vieja o cancelada
-  const agente = b.agente === 'sonny' ? 'sonny' : 'lisa';
+  const agente = ['sonny', 'ray'].indexOf(b.agente) >= 0 ? b.agente : 'lisa';
 
   if (b.tipo === 'progreso') {
-    salaEvento_(agente, 'trabajando', b.texto || 'Trabajando', { mision: resumenSala_(m, agente === 'sonny' ? 6 : 2) });
+    salaEvento_(agente, 'trabajando', b.texto || 'Trabajando', { mision: resumenSala_(m, agente === 'lisa' ? 2 : 6) });
     return;
   }
 
@@ -1305,7 +1438,7 @@ function operador_(b) {
     const segmentos = b.segmentos || [];
     if (m.flujo === 'nota') {
       const tn = leerTrabajo_(m);
-      tn.segmentos_por_clip = b.segmentos_por_clip || {}; tn.duraciones = b.duraciones || {}; tn.transcrito = true;
+      tn.segmentos_por_clip = b.segmentos_por_clip || {}; tn.duraciones = b.duraciones || {}; tn.transcrito = true; tn.apoyos = b.apoyos || {};
       guardarTrabajo_(m, tn);
       (m.clips || []).forEach((c, i) => { c.dur = Number((b.duraciones || {})[String(i + 1)]) || c.dur; });
       m.flujo = ''; m.estado = 'indicaciones'; guardarMision_(m);
@@ -1355,10 +1488,21 @@ function operador_(b) {
     let maestra = '';
     if (b.maestra_id) maestra = '\n💾 Copia maestra (sin recomprimir, ' + (b.maestra_mb || '?') + ' MB): https://drive.google.com/file/d/' + b.maestra_id + '/view';
     else if (b.maestra_error) maestra = '\n⚠️ La copia maestra no se pudo guardar en Drive; el reel de Telegram sí está completo.';
+    const rv = b.revision || {};
+    let control = '';
+    if (rv.ok === true) {
+      control = '\n🔎 <b>Ray Perry</b> (control de calidad): sin problemas' + (rv.lufs !== null && rv.lufs !== undefined ? ' · volumen ' + Number(rv.lufs).toFixed(1) + ' LUFS' : '') + '.';
+      salaEvento_('ray', 'listo', 'Revisión sin problemas.', { mision: resumenSala_(m, 7) });
+    } else if (rv.ok === false) {
+      control = '\n🔎 <b>Ray Perry</b> (control de calidad) encontró esto:\n' + (rv.hallazgos || []).map(x => '• ' + esc_(x)).join('\n') +
+        '\nSi algo no va, pide los cambios con «Otra versión».';
+      salaEvento_('ray', 'alerta', 'Revisión con ' + (rv.hallazgos || []).length + ' observaciones.', { mision: resumenSala_(m, 7) });
+    }
+    const botones = [[{ text: m.modo === 'reel' ? '🎬 Otro reel con este video' : '🎬 Otra versión con este material', callback_data: 'otro' }]];
+    if (tieneTexto_(m)) botones.push([{ text: '📰 Pasar a la sala de redacción', callback_data: 'redaccion' }]);
+    botones.push([{ text: '✅ Cerrar misión', callback_data: 'cerrar' }]);
     return enviar_(m.chat, '🎖 <b>Jason Hayes</b>: misión cumplida, comandante.' +
-      (m.modo === 'reel' ? ' El guion quedó guardado en la carpeta <b>salida</b> de Drive.' : '') + maestra,
-      [[{ text: m.modo === 'reel' ? '🎬 Otro reel con este video' : '🎬 Otra versión con este material', callback_data: 'otro' }],
-        [{ text: '✅ Cerrar misión', callback_data: 'cerrar' }]]);
+      (m.modo === 'reel' ? ' El guion quedó guardado en la carpeta <b>salida</b> de Drive.' : '') + maestra + control, botones);
   }
 }
 
@@ -1527,7 +1671,7 @@ function sesionSubidaDrive_(m) {
 
 /** Mandy piensa con Gemini (gratis) o, si no hay clave de Gemini, con Groq. */
 function ia_(usuario) {
-  const sistema = REGLAS_MANDY.replace('{medio}', prop_('NOMBRE_MEDIO', 'Torre Informativa'));
+  const sistema = REGLAS_MANDY.replace('{medio}', prop_('NOMBRE_MEDIO', 'Torre Informativa')) + textoManual_();
   return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario) : groq_(sistema, usuario);
 }
 
@@ -1538,21 +1682,27 @@ function modelosGemini_() {
     .filter((m, i, lista) => lista.indexOf(m) === i);
 }
 
-function gemini_(sistema, usuario) {
+function gemini_(sistema, usuario, opciones) {
   let ultimo = '';
   const modelos = modelosGemini_();
+  const cache = CacheService.getScriptCache();
   for (let k = 0; k < modelos.length; k++) {
     for (let i = 0; i < 2; i++) {
+      // "rápido": pide razonamiento corto. Si el modelo no acepta la opción, se recuerda y se pide sin ella.
+      const rapido = opciones && opciones.rapido && !cache.get('sin_razonamiento_' + modelos[k]);
+      const config = { responseMimeType: 'application/json', temperature: 0.4 };
+      if (rapido) config.thinkingConfig = { thinkingLevel: 'low' };
       const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelos[k] + ':generateContent', {
         method: 'post', contentType: 'application/json', muteHttpExceptions: true,
         headers: { 'x-goog-api-key': prop_('GEMINI_API_KEY') },
         payload: JSON.stringify({
           systemInstruction: { parts: [{ text: sistema }] },
           contents: [{ role: 'user', parts: Array.isArray(usuario) ? usuario : [{ text: usuario }] }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
+          generationConfig: config,
         }),
       });
       const c = r.getResponseCode();
+      if (c === 400 && rapido) { cache.put('sin_razonamiento_' + modelos[k], '1', 21600); i--; continue; }
       if (c === 200) {
         try {
           const d = JSON.parse(r.getContentText());
@@ -1695,7 +1845,9 @@ function trabajoParaOperador_(m) {
     maestra_url: t.maestra_url || '',
     modo: m.modo || 'reel', imagenes: ['plan', 'visual', 'nota'].indexOf(m.modo) >= 0 ? (m.imagenes || []) : [], audio: m.audio || 'silencio',
     plan: t.plan || null, musica: (m.modo === 'plan' || m.modo === 'nota') && t.plan && t.plan.audio && t.plan.audio.musica ? (m.musica || '') : '',
-    clips: m.modo === 'nota' ? (m.clips || []).map(c => ({ id: c.id, tipo: c.tipo, nombre: c.persona || '', cargo: c.cargo || '' })) : [],
+    clips: m.modo === 'nota' ? (m.clips || []).map((c, i) => ({ id: c.id, tipo: c.tipo, nombre: c.persona || '', cargo: c.cargo || '',
+      usable: ((t.apoyos || {})[String(i + 1)] || {}).usable !== false })) : [],
+    duracion_esperada: duracionSalida_(m, t),
     segmentos_por_clip: m.modo === 'nota' ? (t.segmentos_por_clip || {}) : {},
     conf: { color: prop_('COLOR_MARCA', '#E30613'), fuente: prop_('FUENTE', 'Liberation Sans'), segundos_titulo: prop_('SEGUNDOS_TITULO', '0'),
       medio: prop_('NOMBRE_MEDIO', 'Torre Informativa') },

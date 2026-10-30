@@ -9,8 +9,21 @@ import comun
 from editor import info_video, renderizar, renderizar_visual
 from plan import renderizar_plan
 from nota import renderizar_nota
+from revisor import revisar
 
 BASE = Path(__file__).resolve().parent.parent
+
+
+def control_calidad(mision_id, t, ruta, con_sonido):
+    """Ray Perry revisa el video antes de que salga. No frena la entrega: avisa lo que encontró."""
+    comun.reportar(mision_id, "progreso", agente="ray", texto="Revisando el video antes de entregarlo")
+    try:
+        r = revisar(ruta, float(t.get("duracion_esperada") or 0), con_sonido)
+    except Exception as e:  # noqa: BLE001
+        print(f"   Ray Perry no pudo revisar ({type(e).__name__}).")
+        return {"ok": None, "hallazgos": [], "lufs": None}
+    print("   Control de calidad: " + ("sin problemas" if r["ok"] else f"{len(r['hallazgos'])} observaciones"))
+    return r
 
 
 def main(mision_id):
@@ -55,14 +68,18 @@ def main(mision_id):
         total = renderizar(video, t["cortes"], t["segmentos"], t.get("titulo", ""), t.get("formato", "vertical"),
                            carpeta, destino, conf, avisar=avisar)
 
-    extra = {}
+    plan = t.get("plan") or {}
+    con_sonido = not ((t.get("modo") == "visual" and t.get("audio", "silencio") == "silencio") or
+                      (t.get("modo") == "plan" and (plan.get("audio") or {}).get("modo") == "silencio"
+                       and not (plan.get("audio") or {}).get("musica")))
+    extra = {"revision": control_calidad(mision_id, t, destino, con_sonido)}
     if t.get("maestra_url"):
         avisar("Guardando la copia maestra en Drive")
         mid = comun.subir_maestra(t["maestra_url"], destino)
         if mid:
-            extra = {"maestra_id": mid, "maestra_mb": round(destino.stat().st_size / 1_048_576, 1)}
+            extra.update({"maestra_id": mid, "maestra_mb": round(destino.stat().st_size / 1_048_576, 1)})
         else:
-            extra = {"maestra_error": True}
+            extra["maestra_error"] = True
 
     avisar("Enviando el video a Telegram")
     final = comun.ajustar_peso(destino, total)
@@ -97,13 +114,17 @@ def editar_nota(mision_id, t, carpeta):
     imagenes = [comun.descargar_drive(x, carpeta / f"imagen_{i:02d}") for i, x in enumerate(t.get("imagenes") or [], 1)]
     musica = comun.descargar_drive(t["musica"], carpeta / "musica") if t.get("musica") else None
     destino = carpeta / "nota.mp4"
+    def borrador(ruta, dur):
+        comun.enviar_video(t["chat_id"], ruta, "👀 <b>Borrador</b> de la nota armada (liviano, todavía sin titulares, rótulos ni subtítulos).\n"
+                           "Sonny Quinn sigue trabajando: la versión final llega en unos minutos.", 480, 854, dur)
+
     total = renderizar_nota(rutas, clips, t.get("plan") or {}, imagenes, musica, t.get("segmentos_por_clip") or {},
-                            carpeta, destino, _conf(t), avisar=avisar)
-    extra = {}
+                            carpeta, destino, _conf(t), avisar=avisar, borrador=borrador)
+    extra = {"revision": control_calidad(mision_id, t, destino, True)}
     if t.get("maestra_url"):
         avisar("Guardando la copia maestra en Drive")
         mid = comun.subir_maestra(t["maestra_url"], destino)
-        extra = {"maestra_id": mid, "maestra_mb": round(destino.stat().st_size / 1_048_576, 1)} if mid else {"maestra_error": True}
+        extra.update({"maestra_id": mid, "maestra_mb": round(destino.stat().st_size / 1_048_576, 1)} if mid else {"maestra_error": True})
     avisar("Enviando la nota a Telegram")
     final = comun.ajustar_peso(destino, total)
     info = info_video(final)

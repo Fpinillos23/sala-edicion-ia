@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 import comun
-from transcriptor import transcribir, transcribir_gemini, duracion
+from transcriptor import describir_apoyo, transcribir, transcribir_gemini, duracion
 
 
 def _transcribir(video, carpeta):
@@ -35,7 +35,10 @@ def nota(mision_id, trabajo):
                 ruta = comun.descargar_drive(c["id"], carpeta / "clip")
                 dur = round(duracion(ruta), 2)
                 if not hablado:
-                    return i, dur, None, True
+                    comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {total}: mirando la toma de apoyo")
+                    vista = describir_apoyo(os.environ.get("GEMINI_API_KEY", ""), os.environ.get("MODELO_GEMINI") or "gemini-3.8-flash",
+                                            ruta, carpeta)
+                    return i, dur, vista, True
                 comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {total}: transcribiendo")
                 segs = _transcribir(ruta, carpeta)
                 comun.reportar(mision_id, "progreso", agente="lisa", texto=f"Clip {i} de {total}: listo ({len(segs)} frases)")
@@ -46,10 +49,12 @@ def nota(mision_id, trabajo):
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         resultados = list(ex.map(uno, list(enumerate(clips, 1))))
-    segmentos, duraciones, fallidos = {}, {}, []
+    segmentos, duraciones, fallidos, apoyos = {}, {}, [], {}
     for i, dur, segs, ok in resultados:
         duraciones[str(i)] = dur
-        if segs is not None:
+        if isinstance(segs, dict):
+            apoyos[str(i)] = segs
+        elif segs is not None:
             segmentos[str(i)] = segs
         if not ok:
             fallidos.append(i)
@@ -58,7 +63,7 @@ def nota(mision_id, trabajo):
         raise RuntimeError(f"No pude transcribir ningún clip con voz (clips {', '.join(map(str, fallidos))}). Reintenta en unos minutos.")
     print(f"   Nota transcrita: {total} clips, {len(fallidos)} con problemas.")
     comun.reportar(mision_id, "transcripcion", agente="lisa", segmentos_por_clip=segmentos, duraciones=duraciones,
-                   segmentos=[s for v in segmentos.values() for s in v], duracion=sum(duraciones.values()), fallidos=fallidos)
+                   segmentos=[s for v in segmentos.values() for s in v], duracion=sum(duraciones.values()), fallidos=fallidos, apoyos=apoyos)
 
 
 def main(mision_id):

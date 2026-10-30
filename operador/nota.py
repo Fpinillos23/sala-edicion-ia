@@ -55,7 +55,9 @@ def _validar(plan, clips, duraciones):
 
 def _rellenar_off(bloques, tapas, clips, duraciones):
     """Los bloques de off no tienen imagen propia: lo que no cubra una tapa se cubre con apoyos, en orden."""
-    apoyos = [i + 1 for i, c in enumerate(clips) if c["tipo"] == "apoyo" and duraciones[i] > 0.5]
+    apoyos = [i + 1 for i, c in enumerate(clips) if c["tipo"] == "apoyo" and duraciones[i] > 0.5 and c.get("usable", True)]
+    if not apoyos:  # si todos los apoyos salieron malos, igual se usan antes que dejar el off en negro
+        apoyos = [i + 1 for i, c in enumerate(clips) if c["tipo"] == "apoyo" and duraciones[i] > 0.5]
     if not apoyos:
         return tapas, False
     usado = {a: 0.0 for a in apoyos}
@@ -117,7 +119,7 @@ def _rotulos_automaticos(plan, bloques, clips):
     return textos
 
 
-def renderizar_nota(rutas, clips, plan, imagenes, musica, segmentos_por_clip, carpeta_trabajo, destino, conf, avisar=print):
+def renderizar_nota(rutas, clips, plan, imagenes, musica, segmentos_por_clip, carpeta_trabajo, destino, conf, avisar=print, borrador=None):
     trabajo = Path(carpeta_trabajo).resolve() / "render_nota"
     if trabajo.exists():
         shutil.rmtree(trabajo)
@@ -180,6 +182,16 @@ def renderizar_nota(rutas, clips, plan, imagenes, musica, segmentos_por_clip, ca
                             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "copy",
                             "con_apoyos.mp4"], cwd=str(trabajo))
         base = trabajo / "con_apoyos.mp4"
+
+    # Borrador liviano: el mando ve la nota armada mientras Sonny termina los gráficos
+    if borrador:
+        try:
+            avisar("Enviando un borrador liviano")
+            _ffmpeg(["-i", str(base), "-vf", "scale=-2:'min(854,ih)'", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32",
+                     "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", "borrador.mp4"], cwd=str(trabajo))
+            borrador(trabajo / "borrador.mp4", info_video(trabajo / "borrador.mp4")["duracion"])
+        except Exception as e:  # noqa: BLE001  el borrador es una ayuda: si falla, la nota sigue
+            print(f"   No se pudo enviar el borrador ({type(e).__name__}).")
 
     # 3. Textos, rótulos, subtítulos, música, intro y cierre: el motor de edición libre sobre la nota ya armada
     plan2 = {k: v for k, v in plan.items() if k not in ("bloques", "tapas", "tramos", "velocidad")}

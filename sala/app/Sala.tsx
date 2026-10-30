@@ -18,13 +18,14 @@ type Estado = {
 };
 
 const ETAPAS = ["Recepción", "Inteligencia", "Instrucción", "Plan o guion", "Aprobación", "Edición", "Entregado"];
-const ORDEN = ["mando", "jason", "lisa", "mandy", "sonny"] as const;
+const ORDEN = ["mando", "jason", "lisa", "mandy", "sonny", "ray"] as const;
 const BASE: Record<string, Agente> = {
   mando: { nombre: "Mando", alias: "Comandante", rol: "Aprueba cada misión" },
   jason: { nombre: "Jason Hayes", alias: "Bravo 1", rol: "Coordina y arma el plan de edición" },
   lisa: { nombre: "Lisa Davis", alias: "Inteligencia", rol: "Transcribe el material" },
   mandy: { nombre: "Mandy Ellis", alias: "Enlace", rol: "Guion de reels de entrevistas" },
   sonny: { nombre: "Sonny Quinn", alias: "Bravo 3", rol: "Edita y entrega el video" },
+  ray: { nombre: "Ray Perry", alias: "Bravo 2", rol: "Control de calidad" },
 };
 const ROTULO: Record<string, string> = { espera: "En posición", trabajando: "En operación", listo: "Cumplido", alerta: "Alerta" };
 const ZONA = { timeZone: "America/Bogota", hour12: false } as const;
@@ -48,6 +49,8 @@ const GUION_DEMO: [string, string, string, number][] = [
   ["sonny", "trabajando", "Retocando las imágenes (luz y color naturales)", 6],
   ["sonny", "trabajando", "Animando titulares y rótulos (Remotion)", 6],
   ["sonny", "trabajando", "Montando la versión final", 6],
+  ["ray", "trabajando", "Revisando el video antes de entregarlo", 6],
+  ["ray", "listo", "Revisión sin problemas.", 7],
   ["sonny", "listo", "Reel entregado. Misión cumplida.", 7],
 ];
 

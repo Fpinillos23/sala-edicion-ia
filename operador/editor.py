@@ -93,7 +93,55 @@ def frases_subtitulo(cortes, segmentos, palabras_max=7):
     return salida, posicion
 
 
-def escribir_ass(ruta, frases, titulo, total, tam, fuente, color_marca, segundos_titulo):
+# ---------- Subtítulos tipo reel: frases cortas con la palabra que suena resaltada ----------
+
+AMARILLO_ASS = "&H0000D4FF"  # #FFD400 en formato ASS (azul, verde, rojo)
+NORMA_AUDIO = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000"  # volumen estándar de redes sociales
+
+
+def estilo_reel(fuente, tam):
+    w, h = tam
+    k = min(w, h) / 1080
+    margen = round((h * 0.24) if h > w else 90 * k)
+    return (f"Style: Reel,{fuente},{round(78 * k)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,"
+            f"{max(4, round(7 * k))},2,2,{round(80 * k)},{round(80 * k)},{margen},1")
+
+
+def eventos_reel(frases, tam, resalte=AMARILLO_ASS):
+    """Cada frase se parte en grupos de 3 o 4 palabras; la palabra que se está diciendo sale resaltada y con un pequeño salto."""
+    w, h = tam
+    por_grupo = 3 if h > w else 4
+    lineas = []
+    for ini, fin, texto in frases:
+        palabras = _limpio(texto).split()
+        if not palabras or fin - ini < 0.1:
+            continue
+        pesos = [len(p) + 2 for p in palabras]
+        total = float(sum(pesos))
+        tiempos, t = [], ini
+        for p in pesos:
+            d = (fin - ini) * p / total
+            tiempos.append((t, t + d))
+            t += d
+        n_grupos = -(-len(palabras) // por_grupo)  # grupos parejos: nunca una palabra sola al final
+        tamanos = [len(palabras) // n_grupos + (1 if i < len(palabras) % n_grupos else 0) for i in range(n_grupos)]
+        g = 0
+        for tam_g in tamanos:
+            grupo = palabras[g:g + tam_g]
+            for j, _ in enumerate(grupo):
+                a, b = tiempos[g + j]
+                partes = []
+                for m, pal in enumerate(grupo):
+                    if m == j:
+                        partes.append("{\\c" + resalte + "&\\t(0,90,\\fscx116\\fscy116)\\t(90,180,\\fscx106\\fscy106)}" + pal + "{\\r}")
+                    else:
+                        partes.append(pal)
+                lineas.append(f"Dialogue: 0,{_t(a)},{_t(b)},Reel,,0,0,0,,{' '.join(partes)}")
+            g += tam_g
+    return lineas
+
+
+def escribir_ass(ruta, frases, titulo, total, tam, fuente, color_marca, segundos_titulo, estilo_subs="reel"):
     w, h = tam
     k = min(w, h) / 1080
     sub, tit = round(66 * k), round(70 * k)
@@ -108,12 +156,16 @@ def escribir_ass(ruta, frases, titulo, total, tam, fuente, color_marca, segundos
         "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: Sub,{fuente},{sub},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,{max(3, round(5 * k))},1,2,{round(70 * k)},{round(70 * k)},{margen_sub},1",
         f"Style: Titulo,{fuente},{tit},&H00FFFFFF,&H00FFFFFF,{color_marca},{color_marca},-1,0,0,0,100,100,0,0,3,{round(14 * k)},0,8,{round(80 * k)},{round(80 * k)},{margen_tit},1",
+        estilo_reel(fuente, tam),
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     if titulo:
         lineas.append(f"Dialogue: 1,{_t(0)},{_t(fin_titulo)},Titulo,,0,0,0,,{_limpio(titulo).upper()}")
-    for ini, fin, texto in frases:
-        lineas.append(f"Dialogue: 0,{_t(ini)},{_t(fin)},Sub,,0,0,0,,{_limpio(texto)}")
+    if estilo_subs == "reel":
+        lineas += eventos_reel(frases, tam)
+    else:
+        for ini, fin, texto in frases:
+            lineas.append(f"Dialogue: 0,{_t(ini)},{_t(fin)},Sub,,0,0,0,,{_limpio(texto)}")
     Path(ruta).write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
 
@@ -162,7 +214,7 @@ def renderizar(video, cortes, segmentos, titulo, formato, carpeta_trabajo, desti
     else:
         args = ["-i", "unido.mp4", "-vf", "ass=subs.ass", "-map", "0:v", "-map", "0:a"]
     _ffmpeg(args + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-                    "-c:a", "copy", "-movflags", "+faststart", "final.mp4"], cwd=str(trabajo))
+                    "-af", NORMA_AUDIO, "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "final.mp4"], cwd=str(trabajo))
 
     Path(destino).parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(trabajo / "final.mp4"), str(destino))

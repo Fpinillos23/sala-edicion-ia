@@ -186,3 +186,53 @@ def transcribir_gemini(clave, video, carpeta_trabajo, modelo="gemini-3.8-flash")
         desfase += largo
     segmentos.sort(key=lambda s: s["inicio"])
     return segmentos
+
+
+# ───────────── Ver las tomas de apoyo (para que Jason elija con criterio visual) ─────────────
+
+PROMPT_APOYO = (
+    "Estas son tres imágenes tomadas al principio, a la mitad y al final de una toma de video de apoyo para una nota periodística "
+    "de Valledupar (Colombia). Descríbela para un editor. Devuelve SOLO este JSON: "
+    '{"descripcion": "qué se ve en una frase concreta: lugar, personas, objetos y acción, sin suponer nombres", '
+    '"calidad": "buena | movida | oscura | desenfocada | sobreexpuesta", "plano": "general | medio | detalle", '
+    '"usable": true}. "usable" es false solo si la toma está tan movida, oscura o borrosa que no sirve al aire.'
+)
+
+
+def describir_apoyo(clave, modelo, video, carpeta):
+    """Tres fotogramas pequeños de la toma y su brillo medido; Gemini dice qué se ve y si la toma sirve."""
+    import base64
+    import requests
+    carpeta = Path(carpeta)
+    d = duracion(video)
+    fotos, brillos = [], []
+    for k, frac in enumerate((0.15, 0.5, 0.85)):
+        foto = carpeta / f"cuadro_{k}.jpg"
+        _ffmpeg(["-ss", f"{max(0.0, d * frac):.2f}", "-i", str(video), "-frames:v", "1", "-vf", "scale=384:-2", "-q:v", "5", str(foto)])
+        if foto.exists():
+            fotos.append(foto.read_bytes())
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-ss", f"{max(0.0, d * frac):.2f}", "-i", str(video), "-frames:v", "1",
+                            "-vf", "signalstats,metadata=print:key=lavfi.signalstats.YAVG", "-f", "null", "-"],
+                           capture_output=True, text=True)
+        m = [float(x) for x in __import__("re").findall(r"YAVG=([\d.]+)", r.stderr)]
+        if m:
+            brillos.append(m[0])
+    brillo = round(sum(brillos) / len(brillos)) if brillos else None
+    salida = {"descripcion": "", "calidad": "oscura" if brillo is not None and brillo < 35 else "", "plano": "", "usable": True, "brillo": brillo}
+    if not clave or not fotos:
+        return salida
+    partes = [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(f).decode()}} for f in fotos]
+    cuerpo = {"contents": [{"role": "user", "parts": partes + [{"text": PROMPT_APOYO}]}],
+              "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}}
+    for m in list(dict.fromkeys([modelo, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"])):
+        try:
+            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                              headers={"x-goog-api-key": clave}, json=cuerpo, timeout=(30, 120))
+            if r.status_code == 200:
+                datos = json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+                salida.update({k: datos.get(k, salida[k]) for k in ("descripcion", "calidad", "plano", "usable")})
+                salida["descripcion"] = str(salida["descripcion"])[:200]
+                return salida
+        except (requests.RequestException, ValueError, KeyError, IndexError):
+            continue
+    return salida
