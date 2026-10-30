@@ -9,7 +9,7 @@ import comun
 from editor import info_video, renderizar, renderizar_visual
 from plan import renderizar_plan
 from nota import renderizar_nota
-from revisor import revisar
+from revisor import revisar, revisar_textos_nota
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -120,7 +120,16 @@ def editar_nota(mision_id, t, carpeta):
 
     total = renderizar_nota(rutas, clips, t.get("plan") or {}, imagenes, musica, t.get("segmentos_por_clip") or {},
                             carpeta, destino, _conf(t), avisar=avisar, borrador=borrador)
-    extra = {"revision": control_calidad(mision_id, t, destino, True)}
+    revision = control_calidad(mision_id, t, destino, True)
+    try:
+        editorial = revisar_textos_nota(t.get("plan") or {}, clips)
+    except Exception as e:  # noqa: BLE001  la revisión editorial nunca frena la entrega
+        print(f"   Ray Perry no pudo revisar los textos ({type(e).__name__}).")
+        editorial = []
+    if editorial:
+        revision["hallazgos"] = (revision.get("hallazgos") or []) + editorial
+        revision["ok"] = False
+    extra = {"revision": revision}
     if t.get("maestra_url"):
         avisar("Guardando la copia maestra en Drive")
         mid = comun.subir_maestra(t["maestra_url"], destino)

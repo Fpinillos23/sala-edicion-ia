@@ -109,8 +109,10 @@ def _rotulos_automaticos(plan, bloques, clips):
     vistos, pos = set(), 0.0
     for b in bloques:
         c = clips[b["clip"] - 1]
-        if c["tipo"] == "entrevista" and c.get("nombre") and b["clip"] not in vistos:
-            vistos.add(b["clip"])
+        # Una sola vez por PERSONA: si el mismo entrevistado está en varios clips, el rótulo no se repite
+        quien = " ".join(str(c.get("nombre") or "").lower().split())
+        if c["tipo"] == "entrevista" and quien and quien not in vistos:
+            vistos.add(quien)
             hay = any(str(x.get("estilo")) == "rotulo" and abs(float(x.get("inicio") or 0) - pos) < 3 for x in textos)
             if not hay:
                 textos.append({"texto": c["nombre"], "subtexto": c.get("cargo", ""), "estilo": "rotulo", "posicion": "abajo",

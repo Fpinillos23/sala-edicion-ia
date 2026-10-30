@@ -29,7 +29,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-29.1';
+const VERSION = '2026-10-30.1';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -803,12 +803,47 @@ function planificar_(chat, m) {
 }
 
 /** Jason piensa con su propio rol (Mandy tiene el suyo). */
-function iaJason_(usuario) {
+function iaJason_(usuario, esquema) {
   const sistema = 'Eres JASON HAYES, coordinador de la sala de edición de video de ' + prop_('NOMBRE_MEDIO', 'Torre Informativa') +
     ', un medio periodístico. Conviertes las instrucciones del periodista en planes de edición ejecutables. ' +
     'Escribes en español de Colombia. Responde siempre en JSON válido, sin texto fuera del JSON.' + textoManual_();
-  return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario, { rapido: true }) : groq_(sistema, usuario);
+  return prop_('GEMINI_API_KEY') ? gemini_(sistema, usuario, { rapido: true, esquema: esquema || null }) : groq_(sistema, usuario);
 }
+
+// Estructura obligatoria del armado de una nota (Gemini la respeta campo por campo: menos planes mal armados).
+const _N = { type: 'number' }, _S = { type: 'string' }, _B = { type: 'boolean' };
+const _TARJETA = { type: ['object', 'null'], properties: { texto: _S, subtexto: _S, segundos: _N } };
+const ESQUEMA_NOTA = {
+  type: 'object',
+  properties: {
+    tipo: { type: 'string', enum: ['plan', 'preguntar'] },
+    entendido: _S,
+    preguntas: { type: 'array', items: _S },
+    no_se_puede: { type: 'array', items: _S },
+    identificados: { type: 'array', items: { type: 'object', properties: { clip: { type: 'integer' }, nombre: _S, cargo: _S, evidencia: _S },
+      required: ['clip', 'nombre', 'evidencia'] } },
+    titular_sugerido: _S,
+    plan: { type: 'object', properties: {
+      formato: { type: 'string', enum: ['vertical', 'vertical_recorte', 'cuadrado', 'original'] },
+      bloques: { type: 'array', items: { type: 'object', properties: { clip: { type: 'integer' }, inicio: _N, fin: _N }, required: ['clip', 'inicio', 'fin'] } },
+      tapas: { type: 'array', items: { type: 'object', properties: { apoyo: { type: 'integer' }, desde: _N, en: _N, dura: _N }, required: ['apoyo', 'en', 'dura'] } },
+      textos: { type: 'array', items: { type: 'object', properties: { texto: _S, subtexto: _S, inicio: _N, fin: _N,
+        posicion: { type: 'string', enum: ['arriba', 'centro', 'abajo'] }, estilo: { type: 'string', enum: ['titular', 'rotulo', 'simple'] }, animado: _B },
+        required: ['texto', 'inicio', 'fin', 'estilo'] } },
+      subtitulos: _B,
+      color: { type: 'object', properties: { filtro: { type: 'string', enum: ['ninguno', 'blanco_negro', 'calido', 'frio', 'contraste', 'vivo'] }, brillo: _N } },
+      audio: { type: 'object', properties: { modo: { type: 'string', enum: ['original', 'silencio', 'solo_voz'] }, volumen: _N, musica: _B, volumen_musica: _N } },
+      imagenes: { type: 'object', properties: { usar: { type: 'array', items: { type: 'integer' } },
+        estilo: { type: 'string', enum: ['recuadro_flotante', 'pantalla_completa', 'esquina'] }, posicion: _S, tamano: _N,
+        tiempos: { type: 'array', items: { type: 'object', properties: { imagen: { type: 'integer' }, inicio: _N, fin: _N } } }, retoque: _B } },
+      intro: _TARJETA, cierre: _TARJETA,
+      fundido: { type: 'object', properties: { entrada: _N, salida: _N } },
+      logo: _B,
+    }, required: ['bloques', 'tapas', 'textos', 'subtitulos'] },
+    reglas_nuevas: { type: 'array', items: _S },
+  },
+  required: ['tipo', 'entendido'],
+};
 
 // ───────────────────────── Manual de estilo: lo que el mando enseña queda para siempre ─────────────────────────
 
@@ -878,7 +913,8 @@ function describirPlan_(p, m, t) {
   if (a.modo !== 'silencio' && a.volumen !== undefined && Number(a.volumen) !== 1) au += ' al ' + Math.round(Number(a.volumen) * 100) + ' %';
   if (a.musica && m.musica) au += ' + tu audio de fondo' + (a.volumen_musica !== undefined ? ' al ' + Math.round(Number(a.volumen_musica) * 100) + ' %' : '');
   l.push('• Audio: ' + au + '.');
-  if (p.subtitulos) l.push('• Subtítulos con lo que se dice' + ((t.segmentos || []).length ? '' : ' (⚠️ no hay transcripción con voz: no saldrán)') + '.');
+  const hayVoz = (t.segmentos || []).length || Object.keys(t.segmentos_por_clip || {}).some(k => (t.segmentos_por_clip[k] || []).length);
+  if (p.subtitulos) l.push('• Subtítulos con lo que se dice' + (hayVoz ? '' : ' (⚠️ no hay transcripción con voz: no saldrán)') + '.');
   (p.textos || []).filter(x => x && x.texto).forEach(x => {
     const estilos = { titular: 'titular', rotulo: 'rótulo', simple: 'texto' };
     l.push('• ' + (estilos[x.estilo] || 'Texto').replace(/^./, s => s.toUpperCase()) + (x.animado === false ? ' fijo' : ' animado') + ' ' + (x.posicion || 'arriba') +
@@ -1059,10 +1095,13 @@ function reetiquetar_(chat, m, texto) {
   if (!r) return false;
   const i = parseInt(r[1], 10), c = (m.clips || [])[i - 1], e = etiquetaDe_(r[2]);
   if (!c || !e) { enviar_(chat, '⚠️ No entendí. Escribe, por ejemplo: <code>clip 3: entrevista Juan Gómez, alcalde</code>'); return true; }
-  c.tipo = e.tipo; c.persona = e.persona || ''; c.cargo = e.cargo || '';
+  c.tipo = e.tipo; c.persona = e.persona || ''; c.cargo = e.cargo || ''; c.detectado = false;
   guardarMision_(m);
-  enviar_(chat, '✅ Clip <b>' + i + '</b> ahora es ' + TIPOS_CLIP[c.tipo] + (c.persona ? ' — ' + esc_(c.persona) : '') + '.\n' + inventarioNota_(m),
-    m.estado === 'recibiendo' ? [[{ text: '✅ Ya envié todo', callback_data: 'nota:listo' }]] : null);
+  const enRevision = m.estado === 'revision';
+  enviar_(chat, '✅ Clip <b>' + i + '</b> ahora es ' + TIPOS_CLIP[c.tipo] + (c.persona ? ' — ' + esc_(c.persona) + (c.cargo ? ', ' + esc_(c.cargo) : '') : '') + '.\n' +
+    (enRevision ? (c.persona ? 'Lleva rótulo en su primera aparición. ' : '') + 'Si ya está todo, aprueba el armado.' : inventarioNota_(m)),
+    m.estado === 'recibiendo' ? [[{ text: '✅ Ya envié todo', callback_data: 'nota:listo' }]]
+      : enRevision ? [[{ text: '✅ Aprobar y armar', callback_data: 'aprobar' }], [{ text: '✏️ Cambiar algo', callback_data: 'cambiar' }]] : null);
   return true;
 }
 
@@ -1147,12 +1186,20 @@ function planificarNota_(chat, m) {
       '- Elige cada apoyo por lo que SE VE (dato "se ve" de cada clip de apoyo) para que ilustre lo que se dice en ese momento. ' +
       'Nunca uses los marcados NO USABLE y, si hay alternativas, evita los de calidad movida, oscura o desenfocada.\n' +
       '- Los rótulos con nombre y cargo de cada entrevistado los pone la sala sola en su primera aparición.\n' +
+      '- "identificados": para cada clip de ENTREVISTA que no trae nombre en el inventario, si en alguna transcripción la persona dice su nombre ' +
+      'o el periodista la presenta (ej. "nos acompaña el secretario de Salud, Juan Pérez"), devuelve {"clip": n, "nombre": "", "cargo": "", ' +
+      '"evidencia": "la frase COPIADA LITERALMENTE de la transcripción donde aparece el nombre"}. Si no se dice en el audio, no lo pongas: nunca adivines por la cara ni por el contexto.\n' +
+      '- Subtítulos: en las notas van ACTIVADOS ("subtitulos": true), porque muchos ven los videos sin sonido; solo van en false si el periodista lo pide.\n' +
+      '- Titular: si el periodista no dio uno y no pidió nota sin titular, propón en "titular_sugerido" un titular corto (máximo 9 palabras) ' +
+      'que diga solo hechos que se escuchan en las transcripciones, sin adjetivos ni opiniones. No lo pongas en "textos": la sala lo ubica.\n' +
       '- Además puedes usar del plan de edición libre: ' + CAPACIDADES_PLAN.split('\n').filter(l => /formato|velocidad|color|audio|subtitulos|textos|intro|cierre|fundido|logo|imagenes/.test(l) && !/tramos/.test(l)).join(' ') + '\n' +
       'Duración: si el periodista no dice, apunta a entre 60 y 120 segundos.\n' +
       'Reglas: nunca inventes textos (titulares solo con palabras del periodista o literales de la transcripción); si algo esencial es ambiguo, ' +
       'tipo "preguntar" con máximo 3 preguntas; lo que no se pueda hacer va en "no_se_puede".\n\n' +
       'Devuelve este JSON:\n{"tipo": "plan" | "preguntar", "entendido": "una o dos frases, en segunda persona", "preguntas": [], "no_se_puede": [], ' +
-      '"plan": {"formato": "vertical", "bloques": [], "tapas": [], "textos": [], "subtitulos": false, "audio": {}, "intro": null, "cierre": null, "fundido": {}, "logo": true}, ' + PIDE_REGLAS + '}');
+      '"identificados": [], "titular_sugerido": "", ' +
+      '"plan": {"formato": "vertical", "bloques": [], "tapas": [], "textos": [], "subtitulos": true, "audio": {}, "intro": null, "cierre": null, "fundido": {}, "logo": true}, ' + PIDE_REGLAS + '}',
+      ESQUEMA_NOTA);
   } catch (e) {
     console.error('Planificar nota: ' + (e.message || e));
     m.estado = 'indicaciones'; guardarMision_(m);
@@ -1179,6 +1226,7 @@ function planificarNota_(chat, m) {
     const ajust = ajustarCortes_([b], (t.segmentos_por_clip || {})[k] || [], Number(durs[k]) || 1e9)[0];
     return ajust ? { clip: Number(b.clip), inicio: ajust.inicio, fin: ajust.fin } : null;
   }).filter(Boolean);
+  completarTextosNota_(m, t, p, r);
   t.plan = p;
   guardarTrabajo_(m, t);
   m.estado = 'revision';
@@ -1194,6 +1242,37 @@ function planificarNota_(chat, m) {
     (largo ? '\n\n💾 Como pasa de 1 minuto, Sonny guardará también la copia maestra en Drive.' : '') +
     '\n\n¿Lo apruebas? Si quieres cambiar algo, escríbemelo o mándame una nota de voz.',
     aprobar.concat([[{ text: '✏️ Cambiar algo', callback_data: 'cambiar' }, { text: '❌ Cancelar', callback_data: 'cancelar' }]]));
+}
+
+function norm_(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Lo que necesita quien ve la nota sin sonido: subtítulos, titular y el nombre de cada entrevistado. */
+function completarTextosNota_(m, t, p, r) {
+  const instr = String(m.instruccion || '');
+  // Subtítulos activados, salvo que el periodista haya hablado de subtítulos y Jason los haya quitado
+  p.subtitulos = p.subtitulos === false && /subt[ií]tulo/i.test(instr) ? false : true;
+  // Titular propuesto por Jason (solo hechos del audio), si no hay uno y no se pidió nota sin titular
+  p.textos = (p.textos || []).filter(x => x && String(x.texto || '').trim());
+  const hayTitular = p.textos.some(x => x.estilo === 'titular') || (p.intro && String(p.intro.texto || '').trim());
+  const sug = String((r && r.titular_sugerido) || '').replace(/["«»“”]/g, '').trim();
+  m.titular_propuesto = '';
+  if (!hayTitular && sug && sug.split(/\s+/).length <= 12 && !/(sin|no\b.{0,20})\s*titular/i.test(instr)) {
+    const total = (p.bloques || []).reduce((s, b) => s + (Number(b.fin) - Number(b.inicio)), 0);
+    p.textos.unshift({ texto: sug.slice(0, 90), subtexto: '', inicio: 0.3, fin: Math.max(1, Math.min(5, total - 0.5)), posicion: 'arriba', estilo: 'titular', animado: true });
+    m.titular_propuesto = sug.slice(0, 90);
+  }
+  // Nombres que se dicen en el audio: solo si la frase de evidencia está de verdad en una transcripción
+  const todo = ' ' + Object.keys(t.segmentos_por_clip || {}).map(k => (t.segmentos_por_clip[k] || []).map(x => x.texto).join(' ')).map(norm_).join(' ') + ' ';
+  ((r && r.identificados) || []).forEach(x => {
+    const c = (m.clips || [])[Number(x && x.clip) - 1];
+    const nombre = String((x && x.nombre) || '').trim(), ev = norm_(x && x.evidencia);
+    if (!c || c.tipo !== 'entrevista' || c.persona || !nombre || ev.length < 12) return;
+    const apellido = norm_(nombre).split(' ').filter(w => w.length > 2);
+    if (todo.indexOf(' ' + ev + ' ') < 0 || !apellido.length || !apellido.every(w => (' ' + ev + ' ').indexOf(' ' + w + ' ') >= 0)) return;
+    c.persona = nombre.slice(0, 60); c.cargo = String(x.cargo || '').trim().slice(0, 80); c.detectado = true;
+  });
 }
 
 /** Escaleta de la nota, escrita por el código para que lo que apruebas sea lo que Sonny hará. */
@@ -1217,6 +1296,20 @@ function describirBloques_(p, m) {
   }
   if (offs) l.push('🎞 Lo que el off no tenga cubierto se rellena solo con tus apoyos.');
   if (clips.some(c => c.tipo === 'entrevista' && c.persona)) l.push('🏷 Rótulo con nombre y cargo en la primera aparición de cada entrevistado.');
+  const usados = [];
+  (p.bloques || []).forEach(b => { if (usados.indexOf(b.clip) < 0) usados.push(b.clip); });
+  const detectados = usados.filter(n => (clips[n - 1] || {}).detectado);
+  detectados.forEach(n => {
+    const c = clips[n - 1];
+    l.push('👂 Nombre tomado del audio — clip ' + n + ': <b>' + esc_(c.persona) + '</b>' + (c.cargo ? ', ' + esc_(c.cargo) : '') +
+      '. Si no es así: <code>clip ' + n + ': entrevista Nombre, cargo</code>');
+  });
+  const sinNombre = usados.filter(n => (clips[n - 1] || {}).tipo === 'entrevista' && !(clips[n - 1] || {}).persona);
+  if (sinNombre.length) {
+    l.push('⚠️ <b>Sin nombre</b> (no llevan rótulo): clip ' + sinNombre.join(', ') + '. ¿Quién habla? Escribe por ejemplo ' +
+      '<code>clip ' + sinNombre[0] + ': entrevista Nombre, cargo</code> y después apruebas.');
+  }
+  if (m.titular_propuesto) l.push('📰 Titular propuesto por Jason (sale de lo que se dice en los clips): «' + esc_(m.titular_propuesto) + '». Si quieres otro, escríbemelo.');
   return l.join('\n');
 }
 
@@ -1374,11 +1467,8 @@ function enviarARedaccion_(chat, m, seccion) {
     (m.respuestas || []).filter(x => x.r).forEach(x => bloques.push('[Dato del editor] ' + x.p + ' → ' + x.r));
   }
   if (!bloques.length) return enviar_(chat, '⚠️ Esta misión no tiene texto transcrito para pasar a la Sala de Redacción.');
-  const hechos = ('INFORMACIÓN DEL EDITOR (reportería propia de Torre Informativa grabada en video; transcripciones automáticas de la Sala de Edición IA: ' +
-    'pueden traer errores de transcripción, corrígelos sin cambiar el sentido; las personas sin identificar no se nombran). ' +
-    (m.titulo ? 'Titular usado en el video: ' + m.titulo + '. ' : '') +
-    (m.instruccion ? 'Indicaciones del editor para el video: ' + m.instruccion.replace(/\n/g, ' ') + '. ' : '') +
-    'TRANSCRIPCIONES: ' + bloques.join(' ||| ')).slice(0, 45000);
+  enviar_(chat, '📰 <b>Lisa Davis</b>: preparo la ficha de hechos para la Sala de Redacción…');
+  const hechos = hechosParaRedaccion_(m, bloques);
   try {
     const hoja = SpreadsheetApp.openById(prop_('SHEET_REDACCION', SHEET_REDACCION)).getSheetByName('Entradas');
     if (!hoja) throw new Error('la hoja no tiene la pestaña "Entradas"');
@@ -1392,6 +1482,53 @@ function enviarARedaccion_(chat, m, seccion) {
   salaEvento_('jason', 'listo', 'Material enviado a la Sala de Redacción.', { mision: resumenSala_(m, 7) });
   enviar_(chat, '📰 <b>Jason Hayes</b>: listo, quedó en la Sala de Redacción (sección ' + seccion + '). En unos minutos te llega la nota web y el post por el bot de redacción.',
     [[{ text: '✅ Cerrar misión', callback_data: 'cerrar' }]]);
+}
+
+// La Sala de Redacción trabaja con Groq gratis (unos 8.000 tokens por minuto por pedido): lo que se le manda debe ser corto.
+const LIMITE_REDACCION = 9000; // caracteres, unas 2.500 palabras
+
+/**
+ * Convierte las transcripciones en una FICHA DE HECHOS corta, con el mismo formato que usan los reporteros de la redacción.
+ * Las citas solo pasan si están literalmente en la transcripción. Si Gemini falla, se mandan las transcripciones recortadas.
+ */
+function hechosParaRedaccion_(m, bloques) {
+  const cabeza = 'INFORMACIÓN DEL EDITOR (reportería propia de Torre Informativa grabada en video; la Sala de Edición IA transcribió los clips ' +
+    'y preparó esta ficha: las citas están copiadas de la transcripción automática, que puede traer errores de transcripción; corrígelos sin cambiar el sentido; ' +
+    'las personas sin identificar no se nombran). ' +
+    (m.titulo ? 'Titular usado en el video: ' + m.titulo + '. ' : '') +
+    (m.instruccion ? 'Indicaciones del editor para el video: ' + m.instruccion.replace(/\n/g, ' ').slice(0, 400) + '. ' : '');
+  const transcripcion = bloques.join(' ||| ');
+  let ficha = '';
+  try {
+    if (prop_('GEMINI_API_KEY') && transcripcion.length > 1500) {
+      const r = gemini_('Eres LISA DAVIS, de inteligencia de la sala de edición de ' + prop_('NOMBRE_MEDIO', 'Torre Informativa') + '. ' +
+        'Preparas para la sala de redacción la FICHA DE HECHOS de una nota grabada en video. Usa SOLO lo que se dice en las transcripciones: ' +
+        'no agregues datos, causas ni contexto propios. Cada hecho, corto (máximo 25 palabras) y con quién lo dijo. ' +
+        'Las citas van COPIADAS LITERALMENTE de la transcripción (máximo 40 palabras cada una), con nombre y cargo de quien habla tal como aparecen en la etiqueta del clip; ' +
+        'si la persona no está identificada, "quien" = "persona sin identificar". En "vacios" pon lo que un periodista necesitaría confirmar (fechas, cifras sin fuente, nombres incompletos). Responde en JSON.',
+        'TRANSCRIPCIONES POR CLIP (cada una con su etiqueta entre corchetes):\n' + transcripcion.slice(0, 60000),
+        { rapido: true, esquema: { type: 'object', properties: {
+          que: { type: 'string' }, quien: { type: 'string' }, cuando: { type: 'string' }, donde: { type: 'string' },
+          hechos: { type: 'array', items: { type: 'object', properties: { dato: { type: 'string' }, fuente: { type: 'string' } }, required: ['dato', 'fuente'] } },
+          citas: { type: 'array', items: { type: 'object', properties: { quien: { type: 'string' }, cargo: { type: 'string' }, texto: { type: 'string' } }, required: ['quien', 'texto'] } },
+          vacios: { type: 'array', items: { type: 'string' } } }, required: ['hechos', 'citas'] } });
+      const base = ' ' + norm_(transcripcion) + ' ';
+      const citas = (r.citas || []).filter(c => c && c.texto && base.indexOf(' ' + norm_(c.texto) + ' ') >= 0).slice(0, 12);
+      const l = ['FICHA DE HECHOS:'];
+      const rotulo = { que: 'QUÉ', quien: 'QUIÉN', cuando: 'CUÁNDO', donde: 'DÓNDE' };
+      Object.keys(rotulo).forEach(k => { if (r[k]) l.push(rotulo[k] + ': ' + r[k]); });
+      (r.hechos || []).slice(0, 25).forEach(h => h && h.dato && l.push('- ' + h.dato + (h.fuente ? ' (fuente: ' + h.fuente + ')' : '')));
+      if (citas.length) l.push('CITAS TEXTUALES (copiadas de la transcripción):');
+      citas.forEach(c => l.push('- ' + c.quien + (c.cargo ? ', ' + c.cargo : '') + ': "' + String(c.texto).trim() + '"'));
+      if ((r.vacios || []).length) l.push('POR CONFIRMAR: ' + r.vacios.slice(0, 6).join('; '));
+      ficha = l.join('\n');
+    }
+  } catch (e) { console.warn('Ficha para la redacción: ' + (e.message || e)); }
+  // Lo que quede de espacio va con la transcripción, para que el verificador de la redacción compare contra el audio
+  const resto = LIMITE_REDACCION - cabeza.length - ficha.length - 40;
+  const extracto = resto > 300 ? (ficha ? '\nTRANSCRIPCIÓN (extracto): ' : 'TRANSCRIPCIONES: ') + transcripcion.slice(0, resto) +
+    (transcripcion.length > resto ? ' […]' : '') : '';
+  return (cabeza + ficha + extracto).slice(0, LIMITE_REDACCION);
 }
 
 /** Ejecútala una vez desde el editor: autoriza el acceso a la hoja de la Sala de Redacción y comprueba que se pueda leer. */
@@ -1690,8 +1827,11 @@ function gemini_(sistema, usuario, opciones) {
     for (let i = 0; i < 2; i++) {
       // "rápido": pide razonamiento corto. Si el modelo no acepta la opción, se recuerda y se pide sin ella.
       const rapido = opciones && opciones.rapido && !cache.get('sin_razonamiento_' + modelos[k]);
+      // "esquema": la respuesta debe seguir exactamente esa estructura (JSON Schema). Si el modelo no lo acepta, se pide sin él.
+      const esquema = opciones && opciones.esquema && !cache.get('sin_esquema_' + modelos[k]);
       const config = { responseMimeType: 'application/json', temperature: 0.4 };
       if (rapido) config.thinkingConfig = { thinkingLevel: 'low' };
+      if (esquema) config.responseJsonSchema = opciones.esquema;
       const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelos[k] + ':generateContent', {
         method: 'post', contentType: 'application/json', muteHttpExceptions: true,
         headers: { 'x-goog-api-key': prop_('GEMINI_API_KEY') },
@@ -1702,6 +1842,10 @@ function gemini_(sistema, usuario, opciones) {
         }),
       });
       const c = r.getResponseCode();
+      if (c === 400 && esquema) {
+        console.warn('Gemini no aceptó el esquema en ' + modelos[k] + ': ' + r.getContentText().slice(0, 200));
+        cache.put('sin_esquema_' + modelos[k], '1', 21600); i--; continue;
+      }
       if (c === 400 && rapido) { cache.put('sin_razonamiento_' + modelos[k], '1', 21600); i--; continue; }
       if (c === 200) {
         try {

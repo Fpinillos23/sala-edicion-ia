@@ -64,3 +64,30 @@ def revisar(ruta, duracion_esperada=0.0, con_sonido=True, ancho_alto=None):
                     hallazgos.append(f"Volumen fuera de lo normal: {lufs:.1f} LUFS (lo ideal para redes es -14).")
 
     return {"ok": not hallazgos, "hallazgos": hallazgos[:8], "lufs": lufs, "duracion": round(total, 1)}
+
+
+def revisar_textos_nota(plan, clips):
+    """Revisión editorial de una nota: quien ve sin sonido necesita saber quién habla y de qué se trata.
+    Devuelve una lista de observaciones (vacía si todo está en orden)."""
+    plan = plan or {}
+    usados = []
+    for b in plan.get("bloques") or []:
+        try:
+            n = int(b.get("clip"))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= n <= len(clips) and n not in usados:
+            usados.append(n)
+    entrevistas = [n for n in usados if clips[n - 1].get("tipo") == "entrevista"]
+    hallazgos = []
+    sin_nombre = [n for n in entrevistas if not str(clips[n - 1].get("nombre") or "").strip()]
+    if sin_nombre:
+        hallazgos.append("Entrevista sin nombre en el clip " + ", ".join(map(str, sin_nombre)) +
+                         ": no lleva rótulo, así que quien vea el video no sabe quién habla.")
+    if entrevistas and not plan.get("subtitulos"):
+        hallazgos.append("La nota no tiene subtítulos: quien la vea sin sonido no entiende las entrevistas.")
+    textos = plan.get("textos") or []
+    hay_titular = any(str(x.get("estilo")) == "titular" for x in textos) or bool(str((plan.get("intro") or {}).get("texto") or "").strip())
+    if not hay_titular:
+        hallazgos.append("La nota no tiene titular ni tarjeta de entrada: en los primeros segundos no se sabe de qué trata.")
+    return hallazgos

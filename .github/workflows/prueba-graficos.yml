@@ -1,6 +1,7 @@
 name: Prueba de gráficos (Remotion y retoque)
 
-# Prueba manual: no usa secretos ni toca la sala. Verifica que Remotion y el retoque funcionen en los servidores de GitHub.
+# Prueba manual: no toca la sala. Verifica que Remotion y el retoque funcionen en los servidores de GitHub
+# y (si existe la clave de Gemini) que Gemini acepte la estructura fija del armado de Jason.
 on:
   workflow_dispatch:
 
@@ -94,3 +95,30 @@ jobs:
           test "$negros" = "0"
           test -s /tmp/n/render_nota/render_plan/grafico_02.mov || { echo "::error::falta el rótulo automático"; exit 1; }
           echo "Nota: OK"
+      - name: Estructura fija de Jason con Gemini real
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "::warning::sin clave de Gemini: se omite"; exit 0; fi
+          node -e '
+            const s = require("fs").readFileSync("apps-script/Codigo.gs", "utf8");
+            const a = s.indexOf("const _N ="), b = s.indexOf("};", s.indexOf("const ESQUEMA_NOTA")) + 2;
+            eval(s.slice(a, b) + ";require(\"fs\").writeFileSync(\"/tmp/esquema.json\", JSON.stringify(ESQUEMA_NOTA))");'
+          python - <<'PY'
+          import json, os, requests
+          esquema = json.load(open("/tmp/esquema.json"))
+          pedido = {"systemInstruction": {"parts": [{"text": "Eres Jason Hayes, coordinador de una sala de edición. Responde en JSON."}]},
+                    "contents": [{"role": "user", "parts": [{"text": "Arma una nota con CLIP 1 (entrada, 20 s, 'estamos en el lanzamiento del disco') y CLIP 2 (entrevista sin nombre, 30 s, 'Soy Luis José Villa y estoy feliz'). Propón titular."}]}],
+                    "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": esquema, "thinkingConfig": {"thinkingLevel": "low"}}}
+          for m in ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]:
+              r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                                headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]}, json=pedido, timeout=120)
+              print(f"::warning::{m}: {r.status_code}")
+              if r.status_code == 200:
+                  d = json.loads("".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"]))
+                  print("::warning::respuesta: " + json.dumps(d, ensure_ascii=False)[:600])
+                  assert d.get("tipo") in ("plan", "preguntar") and isinstance((d.get("plan") or {}).get("bloques", []), list)
+                  break
+              if r.status_code == 400:
+                  raise SystemExit("::error::Gemini rechazó el esquema: " + r.text[:300])
+          PY
