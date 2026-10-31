@@ -1,0 +1,8 @@
+# Departamento de Fotografía (Clay, Brock y Eric). No necesita FFmpeg ni Remotion.
+requests>=2.31
+gdown>=5.1
+numpy
+opencv-python-headless>=4.10,<5  # la 5 ya no trae los detectores de rostros (haarcascades)
+pillow
+pillow-heif
+rawpy

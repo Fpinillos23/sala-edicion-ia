@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Centro de Operaciones Bravo",
-  description: "Sala virtual en vivo de la Sala de Edición IA de Torre Informativa.",
+  description: "Sala virtual en vivo de los departamentos de Edición y Fotografía IA de Torre Informativa.",
 };
 
 export const viewport: Viewport = {

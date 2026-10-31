@@ -29,7 +29,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-30.3';
+const VERSION = '2026-10-30.4';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────
@@ -112,7 +112,7 @@ function revisarTelegram() {
     let activo = false, vacios = 0;
     while (Date.now() - inicio < 40000) { // tope por revisión: cuida la cuota de 90 min/día de los activadores
       const offset = parseInt(prop_('TG_OFFSET', '0'), 10);
-      const datos = { timeout: activo ? 8 : 0, allowed_updates: ['message', 'callback_query'] };
+      const datos = { timeout: activo ? 4 : 0, allowed_updates: ['message', 'callback_query'] };
       if (offset) datos.offset = offset;
       const r = tg_('getUpdates', datos);
       if (!r.ok) break;
@@ -121,7 +121,10 @@ function revisarTelegram() {
         P_().setProperty('TG_OFFSET', String(u.update_id + 1)); // se marca antes, para no repetirlo si algo falla
         try { telegram_(u); } catch (err) { avisarError_(err); }
       });
-      if (lista.length) { activo = true; vacios = 0; }
+      // El bot de la Sala de Fotografía se recoge en la misma pasada (un solo activador cuida la cuota diaria)
+      let deFotos = 0;
+      try { deFotos = sondearFotos_(activo ? 4 : 0); } catch (err) { console.error('Sala de fotografía: ' + (err && err.stack || err)); }
+      if (lista.length || deFotos) { activo = true; vacios = 0; }
       else if (!activo || ++vacios >= 2) break; // tras tu último mensaje escucha ~16-25 s más
     }
   } finally {
@@ -167,6 +170,7 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.accion === 'sala') return json_(estadoSala_());
   if (p.accion === 'version') return json_({ ok: true, version: VERSION });
+  if (['trabajo_fotos', 'subida_foto', 'compartir_foto'].indexOf(p.accion) >= 0) return doGetFotos_(p); // Sala de Fotografía (Fotografia.gs)
   if (p.accion === 'trabajo') {
     if (!p.k || p.k !== prop_('CLAVE_SALA')) return json_({ ok: false });
     const m = mision_();
@@ -202,6 +206,7 @@ function doPost(e) {
   }
   try {
     if (body.origen === 'operador') operador_(body);
+    else if (body.origen === 'fotos') operadorFotos_(body); // Sala de Fotografía (Fotografia.gs)
     else telegram_(body);
     return json_({ ok: true });
   } catch (err) {
@@ -2066,11 +2071,17 @@ function estadoSala_() {
     const a = (s.agentes || {})[k] || { estado: 'espera', linea: 'En posición.' };
     agentes[k] = Object.assign({}, AGENTES[k], a);
   });
+  // El mando aprueba en los dos departamentos: se muestra su último movimiento, venga de donde venga
+  let fotografia = null;
+  try { fotografia = estadoSalaFotos_(); } catch (e) { console.error('Estado de fotografía: ' + (e.message || e)); }
+  const mandoV = (s.agentes || {}).mando, mandoF = fotografia && fotografia.mando;
+  const mando = mandoF && (!mandoV || (mandoF.t || 0) > (mandoV.t || 0)) ? mandoF : mandoV;
   agentes.mando = Object.assign({ nombre: prop_('NOMBRE_MANDO', 'Mando'), alias: 'Comandante', rol: 'Aprueba cada misión' },
-    (s.agentes || {}).mando || { estado: 'espera', linea: 'Al mando.' });
+    mando || { estado: 'espera', linea: 'Al mando.' });
   return {
     ok: true, sala: 'Sala de Edición IA', medio: prop_('NOMBRE_MEDIO', 'Torre Informativa'),
     agentes: agentes, mision: s.mision || null, etapas: ETAPAS, bitacora: s.bitacora || [], version: VERSION,
     stats: s.stats || { reels: 0 }, actualizado: s.actualizado || Date.now(),
+    fotografia: fotografia,
   };
 }
