@@ -31,8 +31,9 @@ ESTILOS_COBERTURA = ("natural", "editorial", "blanco_negro")  # World Press Phot
 SRGB_ICC = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 
 
-def revelar(rgb, intensidad, extra):
-    """Revelado natural: los valores salen de medir una copia reducida y se aplican a la foto completa."""
+def revelar(rgb, intensidad, extra, clave_baja=False):
+    """Revelado natural: los valores salen de medir una copia reducida y se aplican a la foto completa.
+    `clave_baja` (fine art): no se aclara una foto oscura, porque la penumbra es parte del estilo."""
     f = LADO_DIAGNOSTICO / max(rgb.shape[:2])
     import cv2
     chica = cv2.resize(rgb, None, fx=f, fy=f, interpolation=cv2.INTER_AREA) if f < 1 else rgb
@@ -40,6 +41,9 @@ def revelar(rgb, intensidad, extra):
     k = 1.35 if intensidad == "media" else 1.0
     for clave in ("sombras", "luces", "contraste", "vibrance"):
         a[clave] *= k
+    if clave_baja:
+        a["exposicion"] = min(a["exposicion"], 0.0)
+        a["sombras"] *= 0.4
     a["exposicion"] += float(extra.get("exposicion") or 0)
     a["temperatura"] += float(extra.get("temperatura") or 0)
     a["exposicion"] = float(np.clip(a["exposicion"], -0.7, 0.7))
@@ -125,7 +129,7 @@ def principal(mision_id):
             if plan.get("sin_retoque"):
                 editada = rgb
             else:
-                editada, _ = revelar(rgb, plan.get("intensidad") or "suave", propio)
+                editada, _ = revelar(rgb, plan.get("intensidad") or "suave", propio, clave_baja=estilo == "fineart")
             del rgb
             base_uint8 = np.asarray(im)
             caras = estilos.rostros(base_uint8)
