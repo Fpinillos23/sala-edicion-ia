@@ -148,7 +148,7 @@ def principal(mision_id):
         notas.append("Pediste el logo, pero no hay marca/logo.png en el repositorio; las fotos van sin logo.")
     if plan.get("difuminar_rostros"):
         notas.append("Rostros difuminados con mosaico. Revisa que no quede ninguno sin cubrir: la detección automática puede fallar con rostros de perfil o pequeños.")
-    vista_ok = fc.enviar_album(t["chat_id"], [(r, f"Foto {txt}") for r, txt in vistas])
+    vista_ok = fc.enviar_album(t["chat_id"], [(r, f"Foto {txt}") for r, txt in vistas], mision_id)
     fc.reportar(mision_id, "listo", agente="brock", archivos=archivos, fallidas=fallidas, vista_enviada=vista_ok, notas=notas,
                 revision={"ok": not hallazgos, "hallazgos": hallazgos[:20]})
     print(f"Brock: {len(archivos)} archivos entregados; Eric: {len(hallazgos)} observaciones.")

@@ -264,7 +264,7 @@ def principal(mision_id):
 
     fc.reportar(mision_id, "progreso", agente="clay", texto="Armando la hoja de contactos")
     hojas = hoja_contactos(sorted(fotos, key=lambda f: f["n"]), set(seleccion), set(descartes), carpeta, t.get("codigo", ""))
-    enviada = all(fc.enviar_foto(t["chat_id"], h, f"🎯 <b>Clay Spenser</b> · hoja de contactos {i + 1} de {len(hojas)}")
+    enviada = all(fc.enviar_foto(t["chat_id"], h, f"🎯 <b>Clay Spenser</b> · hoja de contactos {i + 1} de {len(hojas)}", mision_id)
                   for i, h in enumerate(hojas))
 
     fc.reportar(mision_id, "seleccion", agente="clay", seleccion=seleccion, ranking=ranking[:200], fallidas=fallidas, hoja_enviada=enviada,

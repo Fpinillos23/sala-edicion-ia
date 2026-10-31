@@ -54,7 +54,7 @@ def pedir_trabajo(mision_id):
 
 def reportar(mision_id, tipo, **datos):
     cuerpo = {"origen": "fotos", "k": comun.CLAVE, "mision_id": mision_id, "tipo": tipo, **datos}
-    intentos = 6 if tipo in ("seleccion", "listo", "error") else 2
+    intentos = 6 if tipo in ("seleccion", "listo", "error") else (3 if tipo == "enviar_fotos" else 2)
     for intento in range(intentos):
         try:
             r = requests.post(comun.API, data=json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"),
@@ -101,9 +101,15 @@ def subir_a_drive(mision_id, ruta, nombre):
 
 # ───────────── Telegram (bot de fotografía) ─────────────
 
-def enviar_foto(chat_id, ruta, leyenda=""):
+def _por_apps_script(mision_id, fotos):
+    """Sin token en GitHub: las imágenes viajan al Apps Script, que las envía con el bot de fotografía."""
+    datos = [{"b64": base64.b64encode(Path(r).read_bytes()).decode(), "leyenda": l[:1000]} for r, l in fotos]
+    return reportar(mision_id, "enviar_fotos", fotos=datos)
+
+
+def enviar_foto(chat_id, ruta, leyenda="", mision_id=None):
     if not TELEGRAM_FOTOS:
-        return False
+        return bool(mision_id) and _por_apps_script(mision_id, [(ruta, leyenda)])
     with open(ruta, "rb") as f:
         r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_FOTOS}/sendPhoto",
                           data={"chat_id": chat_id, "caption": leyenda[:1000], "parse_mode": "HTML"},
@@ -111,10 +117,14 @@ def enviar_foto(chat_id, ruta, leyenda=""):
     return r.status_code < 400
 
 
-def enviar_album(chat_id, rutas_y_leyendas):
+def enviar_album(chat_id, rutas_y_leyendas, mision_id=None):
     """Envía vistas previas en álbumes de hasta 10 (Telegram las comprime: solo son para mirar)."""
-    if not TELEGRAM_FOTOS or not rutas_y_leyendas:
+    if not rutas_y_leyendas:
         return False
+    if not TELEGRAM_FOTOS:
+        if not mision_id:
+            return False
+        return all([_por_apps_script(mision_id, rutas_y_leyendas[i:i + 10]) for i in range(0, len(rutas_y_leyendas), 10)])
     ok = True
     for i in range(0, len(rutas_y_leyendas), 10):
         grupo = rutas_y_leyendas[i:i + 10]

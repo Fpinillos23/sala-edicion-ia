@@ -10,7 +10,7 @@ El Departamento de Fotografía vive en el **mismo ecosistema** que la Sala de Ed
 | **Eric Blackburn** (Bravo Actual) | Control de calidad de cada foto antes de que tú la veas | GitHub Actions + Gemini |
 | **Tú** (Mando) | Apruebas el plan, la selección y las fotos finales | Telegram |
 
-Requisito: la Sala de Edición ya instalada y funcionando. La instalación toma unos 10 minutos.
+Requisito: la Sala de Edición ya instalada y funcionando. La instalación toma unos 5 minutos.
 
 ---
 
@@ -23,7 +23,7 @@ Requisito: la Sala de Edición ya instalada y funcionando. La instalación toma 
 ## 2. Apps Script (mismo proyecto de la Sala de Edición)
 
 1. Abre tu proyecto *Sala de Edición IA* en https://script.google.com.
-2. Reemplaza todo el contenido de **Codigo.gs** por el nuevo `apps-script/Codigo.gs` (trae los enganches del nuevo departamento; versión `2026-10-30.4`).
+2. Reemplaza todo el contenido de **Codigo.gs** por el nuevo `apps-script/Codigo.gs` (trae los enganches del nuevo departamento; versión `2026-10-30.5`).
 3. Junto a "Archivos", pulsa **+ → Secuencia de comandos**, llámala **Fotografia** y pega `apps-script/Fotografia.gs`. Guarda.
 4. **Configuración del proyecto** → **Propiedades del script** → agrega `TELEGRAM_TOKEN_FOTOS` con el token del paso 1.
 5. Elige la función **configurarFotos** y pulsa **Ejecutar**. En el registro debe salir `@tu_bot ✅` y la dirección de la carpeta **Sala de Fotografía IA** en tu Drive.
@@ -33,9 +33,9 @@ No hace falta otro activador: la misma revisión de cada minuto atiende los dos 
 
 ## 3. GitHub
 
-1. Sube al repositorio los archivos nuevos y modificados (o pídemelo y los subo yo).
-2. **Settings → Secrets and variables → Actions → New repository secret**: crea `TELEGRAM_TOKEN_FOTOS` con el mismo token.
-   Los demás secretos (`SALA_API`, `SALA_CLAVE`, `GEMINI_API_KEY`) ya están y se comparten.
+Solo hay que subir al repositorio los archivos nuevos y modificados (o pídemelo y los subo yo).
+**No necesitas crear ningún secreto nuevo:** Clay y Brock envían la hoja de contactos y las vistas previas al Apps Script, y es él quien las manda por el bot. Así el token del bot vive en un solo lugar.
+(Si algún día prefieres que GitHub envíe las imágenes directamente, crea el secreto opcional `TELEGRAM_TOKEN_FOTOS` con el mismo token.)
 
 ## 4. Sala virtual (Vercel)
 

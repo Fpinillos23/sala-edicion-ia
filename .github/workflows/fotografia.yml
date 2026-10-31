@@ -21,7 +21,7 @@ jobs:
       MISION_ID: ${{ github.event.client_payload.mision_id }}
       SALA_API: ${{ secrets.SALA_API }}
       SALA_CLAVE: ${{ secrets.SALA_CLAVE }}
-      TELEGRAM_TOKEN_FOTOS: ${{ secrets.TELEGRAM_TOKEN_FOTOS }}
+      TELEGRAM_TOKEN_FOTOS: ${{ secrets.TELEGRAM_TOKEN_FOTOS }}  # opcional: sin él, las fotos llegan a Telegram por el Apps Script
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       MODELO_GEMINI: ${{ vars.MODELO_GEMINI }}
     steps:

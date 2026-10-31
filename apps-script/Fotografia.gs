@@ -63,7 +63,7 @@ function configurarFotos() {
   Logger.log('Recogida de mensajes: ' + (w && w.ok ? 'activa cada minuto (junto con la sala de edición) ✅' : 'ERROR ' + JSON.stringify(w)));
   Logger.log('Trent (Gemini): ' + probarIA_());
   Logger.log('Carpeta de Drive: https://drive.google.com/drive/folders/' + c.base);
-  Logger.log('En GitHub agrega el secreto TELEGRAM_TOKEN_FOTOS con el mismo token. Luego envía /start a tu bot nuevo.');
+  Logger.log('Listo. Envía /start a tu bot nuevo. (GitHub no necesita el token: las fotos de Clay y Brock llegan a Telegram por este Apps Script.)');
 }
 
 function carpetasFoto_() {
@@ -832,6 +832,7 @@ function operadorFotos_(b) {
   const etapa = { clay: 4, brock: 5, eric: 6 }[agente] || 4;
 
   if (b.tipo === 'progreso') return salaEventoF_(agente, 'trabajando', b.texto || 'Trabajando', { mision: resumenSalaF_(m, etapa) });
+  if (b.tipo === 'enviar_fotos') return enviarImagenesF_(m.chat, b.fotos || []);
 
   if (b.tipo === 'error') {
     m.estado = 'error'; m.error_de = agente; guardarMisionF_(m);
@@ -890,6 +891,27 @@ function operadorFotos_(b) {
       [{ text: '✅ Aprobar y entregar', callback_data: 'f:aprobar' }],
       [{ text: '✏️ Pedir cambios', callback_data: 'f:cambios' }, { text: '❌ Cancelar', callback_data: 'f:cancelar' }]]);
   }
+}
+
+/**
+ * Clay y Brock no tienen el token del bot: mandan aquí sus imágenes (hoja de contactos, vistas previas)
+ * en base64 y el Apps Script las envía. Así el token solo vive en las Propiedades del script.
+ */
+function enviarImagenesF_(chat, fotos) {
+  fotos = fotos.slice(0, 10).filter(f => f && f.b64);
+  if (!fotos.length) return;
+  const blob = (f, i) => Utilities.newBlob(Utilities.base64Decode(f.b64), 'image/jpeg', 'f' + i + '.jpg');
+  const url = 'https://api.telegram.org/bot' + prop_('TELEGRAM_TOKEN_FOTOS') + '/';
+  let r;
+  if (fotos.length === 1) {
+    r = UrlFetchApp.fetch(url + 'sendPhoto', { method: 'post', muteHttpExceptions: true,
+      payload: { chat_id: String(chat), caption: String(fotos[0].leyenda || '').slice(0, 1000), parse_mode: 'HTML', photo: blob(fotos[0], 0) } });
+  } else {
+    const datos = { chat_id: String(chat), media: JSON.stringify(fotos.map((f, i) => ({ type: 'photo', media: 'attach://f' + i, caption: String(f.leyenda || '').slice(0, 1000) }))) };
+    fotos.forEach((f, i) => { datos['f' + i] = blob(f, i); });
+    r = UrlFetchApp.fetch(url + 'sendMediaGroup', { method: 'post', muteHttpExceptions: true, payload: datos });
+  }
+  if (r.getResponseCode() >= 300) console.error('Telegram no aceptó las imágenes: ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 200));
 }
 
 // ───────────────────────── Sala virtual (estado público del departamento) ─────────────────────────
