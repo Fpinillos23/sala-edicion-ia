@@ -24,6 +24,9 @@ jobs:
       TELEGRAM_TOKEN_FOTOS: ${{ secrets.TELEGRAM_TOKEN_FOTOS }}  # opcional: sin él, las fotos llegan a Telegram por el Apps Script
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       MODELO_GEMINI: ${{ vars.MODELO_GEMINI }}
+      MODELOS_DIR: ${{ github.workspace }}/.modelos
+      U2NET_HOME: ${{ github.workspace }}/.modelos
+      PHOTOS_CACHE_DIR: ${{ github.workspace }}/.modelos/photos
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +43,22 @@ jobs:
           sudo apt-get install -y -qq -o Acquire::Retries=3 fonts-liberation > /dev/null
           pip install -q -r operador/requirements-fotos.txt
 
+      # Modelos de recorte (rembg), detector de personas (PhotoS) y borrado (LaMa): se descargan una vez y quedan en caché
+      - uses: actions/cache@v4
+        id: modelos
+        with:
+          path: .modelos
+          key: modelos-fotos-v1
+
+      - name: Descargar modelos (solo la primera vez)
+        if: steps.modelos.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        run: |
+          mkdir -p .modelos
+          python -c "from rembg import new_session; new_session('u2net_human_seg'); new_session('isnet-general-use')"
+          python -c "from photo_s import segmask; from PIL import Image; segmask.segment(Image.new('RGB',(64,64)),'object','person')"
+          curl -sL --retry 3 -o .modelos/big-lama.pt https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt
+
       - name: Clay Spenser selecciona
         if: github.event.action == 'seleccionar_fotos'
         working-directory: operador
@@ -48,4 +67,5 @@ jobs:
       - name: Brock Reynolds edita y Eric Blackburn revisa
         if: github.event.action == 'editar_fotos'
         working-directory: operador
+        # torch (CPU) lo instala Brock solo si alguna foto pide borrar algo del fondo
         run: python brock.py "$MISION_ID"

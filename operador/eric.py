@@ -39,8 +39,12 @@ def _estructura(a, b):
     return float((ea @ eb) / (np.linalg.norm(ea) * np.linalg.norm(eb) + 1e-9))
 
 
-def revisar_archivo(n, formato, original_recorte, ruta_salida, razon, caras, cortado, blanco_negro, difuminado):
-    """Devuelve la lista de hallazgos (vacía si todo está bien) para un archivo entregado."""
+def revisar_archivo(n, formato, original_recorte, ruta_salida, razon, caras, cortado, blanco_negro, difuminado,
+                    sujeto=None, estilo_fuerte=False):
+    """Devuelve la lista de hallazgos (vacía si todo está bien) para un archivo entregado.
+    `sujeto`: alfa del sujeto (recortado al formato) cuando se cambió o limpió el fondo; entonces la estructura
+    se compara SOLO dentro del sujeto, porque el fondo cambió a propósito. `estilo_fuerte`: fine art o dramático
+    (cambian el tono a propósito: no se avisa por luces o sombras)."""
     hallazgos = []
     im = Image.open(ruta_salida)
     if 0x8825 in im.getexif():
@@ -54,12 +58,24 @@ def revisar_archivo(n, formato, original_recorte, ruta_salida, razon, caras, cor
     ls = cv2.cvtColor(sal, cv2.COLOR_RGB2GRAY) / 255.0
     if (ls > 0.985).mean() - (lo > 0.985).mean() > 0.02:
         hallazgos.append(f"Foto {n} ({formato}): el revelado quemó algunas luces")
-    if (ls < 0.015).mean() - (lo < 0.015).mean() > 0.03:
+    if not estilo_fuerte and (ls < 0.015).mean() - (lo < 0.015).mean() > 0.03:
         hallazgos.append(f"Foto {n} ({formato}): el revelado empastó algunas sombras")
     if not difuminado:
-        e = _estructura(org, sal)
-        if e < 0.80:
-            hallazgos.append(f"Foto {n} ({formato}): la estructura cambió más de lo esperado (similitud {e:.2f}); revísala a fondo")
+        if sujeto is not None:
+            # Solo el sujeto: la persona tiene que seguir siendo exactamente la misma (nada regenerado ni deformado)
+            nucleo = cv2.resize((sujeto > 0.95).astype(np.uint8), (org.shape[1], org.shape[0]), interpolation=cv2.INTER_NEAREST)
+            nucleo = cv2.erode(nucleo, np.ones((9, 9), np.uint8)).astype(bool)
+            if nucleo.sum() > 400:
+                ys, xs = np.nonzero(nucleo)
+                y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+                sal_r = cv2.resize(sal, (org.shape[1], org.shape[0]))
+                e = _estructura(org[y0:y1, x0:x1] * nucleo[y0:y1, x0:x1, None], sal_r[y0:y1, x0:x1] * nucleo[y0:y1, x0:x1, None])
+                if e < 0.85:
+                    hallazgos.append(f"Foto {n} ({formato}): la persona cambió más de lo esperado al tocar el fondo (similitud {e:.2f}); revisa los bordes")
+        else:
+            e = _estructura(org, sal)
+            if e < (0.70 if estilo_fuerte else 0.80):
+                hallazgos.append(f"Foto {n} ({formato}): la estructura cambió más de lo esperado (similitud {e:.2f}); revísala a fondo")
     if cortado:
         hallazgos.append(f"Foto {n} ({formato}): el recorte corta un rostro; quizá convenga otra proporción")
     if caras and not blanco_negro and not difuminado:
@@ -78,21 +94,28 @@ def revisar_archivo(n, formato, original_recorte, ruta_salida, razon, caras, cor
     return hallazgos
 
 
-def revisar_visual(pares):
-    """pares: [(n, bytes_original, bytes_editada)]. Devuelve hallazgos visuales de Gemini (solo problemas claros)."""
+def revisar_visual(pares, intenciones=None):
+    """pares: [(n, bytes_original, bytes_editada)]. Devuelve hallazgos visuales de Gemini (solo problemas claros).
+    `intenciones`: {n: "lo que se pidió"} — cambios hechos a propósito (fondo nuevo, objetos borrados, estilo), que no son errores."""
     if not fc.GEMINI or not pares:
         return []
     hallazgos = []
     for i in range(0, len(pares), 6):
         lote = pares[i:i + 6]
         imagenes = []
+        pedidos = []
         for n, a, b in lote:
             imagenes += [(f"Foto {n} — ANTES:", a), (f"Foto {n} — DESPUÉS:", b)]
+            if (intenciones or {}).get(n):
+                pedidos.append(f"Foto {n}: {intenciones[n]}")
         r = fc.gemini_json(
             "Eres ERIC BLACKBURN, control de calidad de fotografía de un medio periodístico. Compara cada par ANTES/DESPUÉS. "
-            "El DESPUÉS debe ser la misma foto con luz y color corregidos, de forma natural. Reporta SOLO problemas claros y visibles: "
-            "piel plástica o sin textura, color irreal o tono de piel antinatural, halos alrededor de bordes, ruido excesivo, "
-            "elementos agregados o quitados, o un recorte que corte una cabeza o una mano de forma incómoda. "
+            "El DESPUÉS debe ser la misma foto, con la PERSONA intacta (mismos rasgos, misma textura de piel). "
+            + ("Cambios pedidos a propósito, que NO son errores: " + "; ".join(pedidos) + ". En esas fotos revisa la CALIDAD del cambio: "
+               "bordes recortados o con halo alrededor del cabello, restos o manchas donde se borró algo, luz del sujeto que no "
+               "coincide con el fondo nuevo, cabello cortado. " if pedidos else "En las demás, solo se corrigió luz y color. ")
+            + "Reporta SOLO problemas claros y visibles: piel plástica o sin textura, color de piel antinatural, halos, ruido excesivo, "
+            "elementos agregados o quitados SIN haberse pedido, o un recorte que corte una cabeza o una mano de forma incómoda. "
             "Si una foto está bien, \"problema\" es null. Escribe el problema en máximo 14 palabras, en español.",
             imagenes, ESQUEMA_VISUAL)
         for x in (r or {}).get("fotos", []):

@@ -29,7 +29,7 @@ const ETAPAS = ['Sin misión', 'Recepción', 'Inteligencia', 'Instrucción', 'Pl
 const NOMBRES_OPERACION = ['Guatapurí', 'Tridente', 'Centinela', 'Halcón', 'Sierra', 'Relámpago', 'Ceiba', 'Acordeón', 'Cacique', 'Faro', 'Brújula', 'Cóndor'];
 const LIBRES = ['lista', 'cancelada', 'cerrada'];
 // Cambia con cada entrega de código. Sirve para detectar si falta crear la "Nueva versión" de la implementación.
-const VERSION = '2026-10-30.5';
+const VERSION = '2026-10-31.1';
 const LIMITE_TELEGRAM = 20 * 1024 * 1024; // un bot solo descarga archivos de hasta 20 MB
 
 // ───────────────────────── Configuración ─────────────────────────

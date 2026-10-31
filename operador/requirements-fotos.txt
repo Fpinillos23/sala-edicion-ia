@@ -6,3 +6,7 @@ opencv-python-headless>=4.10,<5  # la 5 ya no trae los detectores de rostros (ha
 pillow
 pillow-heif
 rawpy
+photo-s-tools[enhance]>=2.6   # PhotoS: reducción de ruido, claridad, recuperación de luces, detector de personas
+rembg>=2.0.60                 # recorte del sujeto (u2net_human_seg, isnet-general-use)
+onnxruntime
+# torch (CPU) y el modelo LaMa se instalan solos la primera vez que hay que borrar algo del fondo

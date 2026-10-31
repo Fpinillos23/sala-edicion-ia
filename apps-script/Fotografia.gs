@@ -29,7 +29,13 @@ const ESTILOS_FOTO = {
   natural: 'Natural (solo luz y color corregidos)', editorial: 'Editorial (sobrio, algo de contraste, color contenido)',
   calido: 'Cálido', frio: 'Frío', blanco_negro: 'Blanco y negro', contraste: 'Más contraste', vivo: 'Color vivo',
   cine: 'Cine (sombras frías, luces cálidas, suave)', mate: 'Mate (negros levantados, suave)',
+  dramatico: 'Dramático (contraste local alto, color sobrio, fondo oscuro)',
+  fineart: 'Fine art pictórico (inspirado en Rebeca Saray)',
 };
+const ESTILOS_COBERTURA = ['natural', 'editorial', 'blanco_negro'];
+// El fine art de autor solo se aplica si el mando lo pide con esas palabras (no lo decide la IA por su cuenta)
+const PIDE_FINEART = /saray|fine ?art|pict[oó]ric/i;
+const TIPOS_FONDO = ['ninguno', 'estudio', 'imagen', 'desenfocado', 'color'];
 const FORMATOS_FOTO = {
   original: 'Proporción original', '4:5': 'Vertical 4:5 (feed de Instagram)', '1:1': 'Cuadrado 1:1',
   '16:9': 'Horizontal 16:9 (web, portada)', '9:16': 'Vertical 9:16 (historias)', '3:2': 'Horizontal 3:2 (clásico)',
@@ -172,6 +178,7 @@ function telegramFotos_(u) {
 
   if (msg.voice) return notaDeVozF_(chat, msg.voice);
   const archivo = archivoFotoDe_(msg);
+  if (archivo && /^fondo\b/i.test(texto)) return guardarFondoF_(chat, archivo, texto);
   if (archivo) return recibirFotoF_(chat, msg, archivo, texto);
   if (msg.video || (msg.document && /^video\//.test(msg.document.mime_type || ''))) {
     return enviarF_(chat, '🎬 <b>Trent Sawyer</b>: los videos van a la Sala de Edición (tu otro bot). Aquí trabajamos fotos.');
@@ -200,6 +207,9 @@ function bienvenidaF_(chat) {
     '2. Envíame las fotos <b>como archivo</b> (📎 → Archivo) para no perder calidad. Si son más de 20 MB o RAW, súbelas a <b>Sala de Fotografía IA › entrada</b> en Drive y escribe <code>/drive</code>.\n' +
     '3. Pulsa <b>✅ Ya envié todas</b> y dime, con tus palabras o en nota de voz 🎙, para qué son y qué quieres.\n' +
     '4. Apruebas el plan, revisas la selección de Clay y, al final, apruebas las fotos editadas.\n\n' +
+    '<b>Edición detallada</b> (estudio, redes y arte; nunca en coberturas): pide <i>retoque detallado</i>, <i>limpiar el fondo</i>, ' +
+    '<i>borrar</i> algo concreto o <i>cambiar el fondo</i> (telón pintado, desenfocado, color, o una foto tuya: envíala con el texto <code>fondo</code>). ' +
+    'El estilo <i>fine art</i> inspirado en Rebeca Saray se aplica solo cuando lo pides por su nombre, en las fotos que indiques.\n\n' +
     'Comandos: /sesion /drive /listo /estado /reintentar /cancelar /ayuda');
 }
 
@@ -380,6 +390,31 @@ function recibirFotoF_(chat, msg, archivo, texto) {
   avisarRecepcionF_(chat, m, msg.media_group_id, !!archivo.comprimida);
 }
 
+/** Foto enviada con el texto «fondo»: se guarda como fondo disponible para Brock (no entra a la selección de Clay). */
+function guardarFondoF_(chat, archivo, texto) {
+  if ((archivo.file_size || 0) > LIMITE_TELEGRAM) return enviarF_(chat, '📦 Ese fondo pasa de 20 MB. Envíalo más liviano (o como foto normal, que Telegram lo comprime).');
+  let m = misionF_();
+  if (!m || LIBRES_FOTO.indexOf(m.estado) >= 0 || m.estado === 'error') {
+    m = nuevaMisionF_(chat);
+    if (!m) return enviarF_(chat, '📷 Hay una misión en curso. Escribe /cancelar si quieres empezar otra.');
+    m.estado = 'esperando_fotos'; guardarMisionF_(m);
+  }
+  const dl = descargarTgF_(archivo.file_id);
+  if (!dl) return enviarF_(chat, '⚠️ No pude recibir ese fondo de Telegram. Envíalo de nuevo, por favor.');
+  const datos = leerDatosF_();
+  datos.fondos = datos.fondos || [];
+  const n = datos.fondos.length + 1;
+  const ext = (dl.ruta.match(/\.(\w{3,4})$/) || [0, 'jpg'])[1];
+  const f = DriveApp.getFolderById(m.originales).createFile(dl.blob.setName('fondo_' + n + '.' + ext));
+  // Lo que acompaña al fondo es una nota del fondo, no la instrucción de la misión
+  const resto = texto.replace(/^fondo\b[\s:,-]*/i, '').trim().slice(0, 200);
+  datos.fondos.push({ n: n, id: f.getId(), nombre: 'fondo_' + n + '.' + ext, nota: resto });
+  guardarDatosF_(datos);
+  salaEventoF_('brock', 'espera', 'Recibí un fondo nuevo para la misión.', { mision: resumenSalaF_(m, 2) });
+  enviarF_(chat, '🖼 <b>Brock Reynolds</b>: guardé el <b>fondo ' + n + '</b>. Dime en qué fotos lo pongo, por ejemplo: <i>«pon el fondo ' + n + ' en la 2 y la 5»</i>.' +
+    (m.estado === 'esperando_fotos' || m.estado === 'recibiendo' ? '\nPuedes seguir enviando las fotos de la misión.' : ''));
+}
+
 /** Responde una sola vez por álbum, y como máximo una vez cada 25 s si llegan fotos sueltas. */
 function avisarRecepcionF_(chat, m, grupo, comprimida) {
   const cache = CacheService.getScriptCache();
@@ -489,6 +524,10 @@ function textoLibreF_(chat, texto) {
 
 // ───────────────────────── Trent Sawyer: plan de selección y edición ─────────────────────────
 
+const _LIMPIEZA = { type: 'object', properties: { estudio: _FB, general: _FB, quitar: _FLISTA }, required: ['estudio', 'general', 'quitar'] };
+const _FONDO = { type: 'object', properties: { tipo: { type: 'string', enum: TIPOS_FONDO }, fondo_n: { type: ['number', 'null'] }, color: { type: ['string', 'null'] } },
+  required: ['tipo', 'fondo_n', 'color'] };
+
 const ESQUEMA_PLAN_FOTO = {
   type: 'object',
   properties: {
@@ -504,26 +543,47 @@ const ESQUEMA_PLAN_FOTO = {
     logo: _FB,
     difuminar_rostros: _FB,
     sin_retoque: _FB,
+    ruido: { type: 'string', enum: ['auto', 'no', 'fuerte'] },
+    detalle: { type: 'string', enum: ['estandar', 'alto'] },
+    variante: { type: 'string', enum: ['oscuro', 'dorado'] },
+    limpieza: _LIMPIEZA,
+    fondo: _FONDO,
     por_foto: { type: 'array', items: { type: 'object', properties: {
       n: _FN, estilo: { type: ['string', 'null'], enum: Object.keys(ESTILOS_FOTO).concat([null]) },
       formatos: { type: ['array', 'null'], items: { type: 'string', enum: Object.keys(FORMATOS_FOTO) } },
-      exposicion: { type: ['number', 'null'] }, temperatura: { type: ['number', 'null'] }, nota: { type: ['string', 'null'] } }, required: ['n'] } },
+      exposicion: { type: ['number', 'null'] }, temperatura: { type: ['number', 'null'] },
+      detalle: { type: ['string', 'null'], enum: ['estandar', 'alto', null] },
+      variante: { type: ['string', 'null'], enum: ['oscuro', 'dorado', null] },
+      limpieza: { type: ['object', 'null'], properties: _LIMPIEZA.properties },
+      fondo: { type: ['object', 'null'], properties: _FONDO.properties },
+      nota: { type: ['string', 'null'] } }, required: ['n'] } },
     no_puede: _FLISTA,
     pregunta: { type: ['string', 'null'] },
   },
-  required: ['tipo', 'resumen', 'cantidad', 'tomas', 'criterios', 'estilo', 'intensidad', 'formatos', 'lado_max', 'logo', 'difuminar_rostros', 'sin_retoque', 'por_foto', 'no_puede', 'pregunta'],
+  required: ['tipo', 'resumen', 'cantidad', 'tomas', 'criterios', 'estilo', 'intensidad', 'formatos', 'lado_max', 'logo', 'difuminar_rostros', 'sin_retoque',
+    'ruido', 'detalle', 'variante', 'limpieza', 'fondo', 'por_foto', 'no_puede', 'pregunta'],
 };
 
 const CAPACIDADES_FOTO =
   'Lo que el equipo SÍ sabe hacer:\n' +
   '- Clay: descartar fotos movidas, desenfocadas, quemadas o con ojos cerrados; agrupar ráfagas y repetidas y quedarse con la mejor; ' +
   'puntuar composición, momento, expresión y relevancia; cubrir la lista de tomas; elegir N fotos.\n' +
-  '- Brock: revelado natural medido en cada foto (exposición, balance de blancos, sombras, luces, contraste, vibrance, nitidez suave), ' +
-  'estilos (' + Object.keys(ESTILOS_FOTO).join(', ') + '), intensidad suave o media, recortes inteligentes que respetan rostros ' +
-  '(original, 4:5, 1:1, 16:9, 9:16, 3:2), tamaño máximo en píxeles (0 = original), logo del medio, difuminar rostros (protección de identidad), ' +
-  'quitar la ubicación GPS (siempre), ajustes por foto (más clara, más cálida, otro estilo, otro formato).\n' +
-  '- Eric: revisa cada foto antes de mostrártela (luces quemadas, color de piel, recortes que corten cabezas, que no se haya alterado el contenido).\n' +
-  'Lo que NO sabe hacer: quitar o agregar objetos o personas, cambiar fondos, suavizar piel, adelgazar o cambiar rasgos, generar imágenes, enderezar perspectiva compleja, unir panorámicas o HDR.';
+  '- Brock: revelado natural medido en cada foto (exposición, balance de blancos, sombras, luces, contraste, vibrance, nitidez suave); ' +
+  'reducción de ruido para fotos de noche o interiores ("ruido"); estilos (' + Object.keys(ESTILOS_FOTO).join(', ') + '), intensidad suave o media; ' +
+  'recortes inteligentes que respetan rostros (original, 4:5, 1:1, 16:9, 9:16, 3:2), tamaño máximo en píxeles (0 = original), logo del medio, ' +
+  'difuminar rostros (protección de identidad), quitar la ubicación GPS (siempre), ajustes por foto (más clara, más cálida, otro estilo, otro formato).\n' +
+  '- Brock, edición detallada (SOLO estudio, redes y artística; NUNCA cobertura): ' +
+  '"detalle": "alto" = retoque de alto nivel natural (empareja el tono de la piel sin borrar poros ni pecas, luz en el rostro, ojos con vida); ' +
+  '"limpieza.estudio" = fondo de estudio parejo (quita motas, polvo, arrugas y manchas del telón); ' +
+  '"limpieza.general" = borra distracciones evidentes del fondo (cables, basura, soportes, letreros, gente al fondo); ' +
+  '"limpieza.quitar" = lista de cosas concretas que el fotógrafo pide borrar ("el poste", "la silla de la derecha"); ' +
+  '"fondo" = cambiar el fondo: "estudio" (telón pintado, color en "color"), "imagen" (una foto de fondo que el fotógrafo envió: número en "fondo_n"), ' +
+  '"desenfocado" (modo retrato), "color" (liso o degradado, color en "color", p. ej. blanco para producto). ' +
+  'Estilos de autor: "fineart" (pictórico inspirado en Rebeca Saray; "variante" oscuro = clave baja con rostro luminoso y fondo neblinoso, ' +
+  'dorado = contraluz cálido con neblina) y "dramatico".\n' +
+  '- Eric: revisa cada foto antes de mostrártela (luces quemadas, color de piel, recortes, bordes del fondo nuevo, restos de lo borrado, que la persona no cambie).\n' +
+  'Lo que NO sabe hacer: quitar o agregar PERSONAS principales, adelgazar o cambiar rasgos, suavizar la piel hasta quitar la textura, ' +
+  'generar imágenes o fondos con IA, enderezar perspectiva compleja, unir panorámicas o HDR, recuperar detalle de una foto movida o de una captura de video.';
 
 function planificarF_(chat, m, cambio, directo) {
   const d = leerDatosF_();
@@ -543,6 +603,13 @@ function planificarF_(chat, m, cambio, directo) {
     '- "estilo": el que pida; si no, cobertura natural, estudio editorial, redes natural o vivo, artística el que mejor sirva. En cobertura solo natural, editorial o blanco_negro.\n' +
     '- "por_foto": ajustes para fotos concretas que mencione por número ("la 3 más clara" → exposicion 0.2; "más cálida" → temperatura 0.03). Vacío si no hay.\n' +
     '- "sin_retoque": true solo si pide entregar sin retocar.\n' +
+    '- "ruido": "auto" siempre, salvo que pida quitar el grano/ruido con fuerza ("fuerte") o dejarlo ("no").\n' +
+    '- "detalle": "alto" si pide retoque detallado, de piel, de belleza, de alto nivel o "como profesional"; si no, "estandar".\n' +
+    '- "limpieza": {"estudio", "general", "quitar"} según lo que pida; todo en false/vacío si no pide limpiar ni borrar nada.\n' +
+    '- "fondo": {"tipo": "ninguno", "fondo_n": null, "color": null} salvo que pida cambiar el fondo. ' + textoFondosF_(d) + '\n' +
+    '- "estilo": "fineart" SOLO si menciona a Rebeca Saray, fine art o estilo pictórico; "variante": "dorado" si pide luz dorada, atardecer o contraluz cálido; si no, "oscuro".\n' +
+    '- Todo lo de edición detallada (detalle alto, limpieza, fondo, fineart, dramático) es SOLO para estudio, redes o artística; en cobertura déjalo apagado ' +
+    'y, si lo pidió, explícalo en "no_puede" (normas de World Press Photo: en periodismo no se agrega ni se quita contenido).\n' +
     '- "no_puede": lo que pidió y el equipo no sabe hacer (ver arriba). Vacío si todo se puede.\n' +
     '- "pregunta": solo si falta algo imprescindible para trabajar; si no, null.';
   const p = gemini_(sistemaTrent_(), usuario, { rapido: true, esquema: ESQUEMA_PLAN_FOTO });
@@ -550,8 +617,8 @@ function planificarF_(chat, m, cambio, directo) {
   p.formatos = (p.formatos || []).filter(f => FORMATOS_FOTO[f]).slice(0, 3);
   if (!p.formatos.length) p.formatos = ['original'];
   if (!ESTILOS_FOTO[p.estilo]) p.estilo = 'natural';
-  if (p.tipo === 'cobertura' && ['natural', 'editorial', 'blanco_negro'].indexOf(p.estilo) < 0) p.estilo = 'editorial';
   p.lado_max = Math.max(0, Math.min(8000, Math.round(Number(p.lado_max) || 0)));
+  normalizarEdicionF_(p, m, d, cambio);
   d.plan = p; guardarDatosF_(d);
 
   if (p.pregunta) {
@@ -575,6 +642,63 @@ function planificarF_(chat, m, cambio, directo) {
     [{ text: '✏️ Cambiar el plan', callback_data: 'f:cambiar_plan' }, { text: '❌ Cancelar', callback_data: 'f:cancelar' }]]);
 }
 
+function textoFondosF_(d) {
+  const f = d.fondos || [];
+  return f.length ? 'Fondos que envió el fotógrafo: ' + f.map(x => 'fondo ' + x.n + (x.nota ? ' («' + x.nota + '»)' : '')).join(', ') + ' (usa "imagen" con su número).'
+    : 'El fotógrafo no ha enviado fotos de fondo: si pide un fondo de imagen, usa "estudio" y dile en "no_puede" que envíe la foto del fondo con el texto «fondo».';
+}
+
+/** Reglas que no se dejan a la IA: periodismo intacto, fine art solo a pedido, valores válidos. */
+function normalizarEdicionF_(p, m, d, cambio) {
+  const limpiarL = l => ({ estudio: !!(l && l.estudio), general: !!(l && l.general), quitar: ((l && l.quitar) || []).map(String).filter(Boolean).slice(0, 6) });
+  const limpiarF = f => {
+    const tipo = f && TIPOS_FONDO.indexOf(f.tipo) >= 0 ? f.tipo : 'ninguno';
+    const n = f && f.fondo_n ? Math.round(Number(f.fondo_n)) : null;
+    return { tipo: tipo === 'imagen' && !((d.fondos || []).some(x => x.n === n)) ? 'estudio' : tipo, fondo_n: n, color: f && f.color ? String(f.color).slice(0, 30) : null };
+  };
+  p.ruido = ['auto', 'no', 'fuerte'].indexOf(p.ruido) >= 0 ? p.ruido : 'auto';
+  p.detalle = p.detalle === 'alto' ? 'alto' : 'estandar';
+  p.variante = p.variante === 'dorado' ? 'dorado' : 'oscuro';
+  p.limpieza = limpiarL(p.limpieza);
+  p.fondo = limpiarF(p.fondo);
+  p.por_foto = (p.por_foto || []).map(x => {
+    const y = Object.assign({}, x);
+    if (y.limpieza) y.limpieza = limpiarL(y.limpieza);
+    if (y.fondo) y.fondo = limpiarF(y.fondo);
+    if (y.estilo && !ESTILOS_FOTO[y.estilo]) delete y.estilo;
+    return y;
+  });
+  const pidio = PIDE_FINEART.test((m.instruccion || '') + ' ' + (cambio || ''));
+  const quitarFineart = e => (e === 'fineart' && !pidio) ? 'editorial' : e;
+  p.estilo = quitarFineart(p.estilo);
+  p.por_foto.forEach(x => { if (x.estilo) x.estilo = quitarFineart(x.estilo); });
+  if (p.tipo === 'cobertura') {
+    const pidioEdicion = p.detalle === 'alto' || p.fondo.tipo !== 'ninguno' || p.limpieza.estudio || p.limpieza.general || p.limpieza.quitar.length ||
+      ESTILOS_COBERTURA.indexOf(p.estilo) < 0 || p.por_foto.some(x => x.fondo || x.limpieza || x.detalle === 'alto' || (x.estilo && ESTILOS_COBERTURA.indexOf(x.estilo) < 0));
+    if (ESTILOS_COBERTURA.indexOf(p.estilo) < 0) p.estilo = 'editorial';
+    p.detalle = 'estandar'; p.limpieza = limpiarL(null); p.fondo = limpiarF(null);
+    p.por_foto.forEach(x => { delete x.fondo; delete x.limpieza; delete x.detalle; if (x.estilo && ESTILOS_COBERTURA.indexOf(x.estilo) < 0) x.estilo = 'editorial'; });
+    const aviso = 'En cobertura periodística no cambio ni limpio fondos, no hago retoque de piel ni estilos de autor: solo luz, color, recorte y ruido (normas de World Press Photo).';
+    if (pidioEdicion && (p.no_puede || []).indexOf(aviso) < 0) p.no_puede = (p.no_puede || []).concat([aviso]);
+  }
+}
+
+function describirLimpiezaF_(l, pre) {
+  if (!l) return '';
+  const partes = [];
+  if (l.estudio) partes.push('fondo de estudio parejo');
+  if (l.general) partes.push('borrar distracciones del fondo');
+  if ((l.quitar || []).length) partes.push('borrar: ' + l.quitar.join(', '));
+  return partes.length ? pre + 'Limpieza: ' + esc_(partes.join('; ')) + '\n' : '';
+}
+
+function describirFondoF_(f, pre) {
+  if (!f || !f.tipo || f.tipo === 'ninguno') return '';
+  const nombres = { estudio: 'telón pintado' + (f.color ? ' ' + f.color : ''), imagen: 'tu fondo ' + (f.fondo_n || ''), desenfocado: 'desenfocado (modo retrato)',
+    color: 'color ' + (f.color || 'claro') };
+  return pre + 'Fondo nuevo: ' + esc_(nombres[f.tipo] || f.tipo) + '\n';
+}
+
 function describirPlanF_(p, total) {
   const tipos = { cobertura: 'Cobertura periodística', estudio: 'Sesión de estudio', redes: 'Redes sociales', artistica: 'Fotografía artística' };
   let t = '🗺 <b>Trent Sawyer</b> · Plan de la misión\n<i>' + esc_(p.resumen || '') + '</i>\n\n' +
@@ -585,10 +709,15 @@ function describirPlanF_(p, total) {
     '• Tamaño: ' + (p.lado_max ? 'lado mayor de ' + p.lado_max + ' px' : 'resolución original') + '\n' +
     (p.logo ? '• Con el logo del medio\n' : '') +
     (p.difuminar_rostros ? '• Rostros difuminados (protección de identidad)\n' : '') +
-    '• Ubicación GPS: se quita de todas las fotos\n';
+    '• Ubicación GPS: se quita de todas las fotos\n' +
+    (p.ruido === 'fuerte' ? '• Reducción de ruido fuerte\n' : p.ruido === 'no' ? '• Sin reducción de ruido\n' : '') +
+    (p.detalle === 'alto' ? '• Retoque detallado: piel pareja con textura, luz en el rostro, ojos\n' : '') +
+    (p.estilo === 'fineart' ? '• Variante fine art: ' + (p.variante === 'dorado' ? 'dorada (contraluz cálido y neblina)' : 'oscura (clave baja, rostro luminoso, fondo neblinoso)') + '\n' : '') +
+    describirLimpiezaF_(p.limpieza, '• ') + describirFondoF_(p.fondo, '• ');
   if ((p.tomas || []).length) t += '\n<b>Tomas que debe cubrir</b>\n' + p.tomas.map(x => '• ' + (x.obligatoria ? '⭐ ' : '') + esc_(x.descripcion)).join('\n') + '\n';
   if ((p.criterios || []).length) t += '\n<b>Criterios de selección</b>\n' + p.criterios.slice(0, 6).map(x => '• ' + esc_(x)).join('\n') + '\n';
-  if ((p.por_foto || []).length) t += '\n<b>Ajustes por foto</b>\n' + p.por_foto.map(x => '• Foto ' + x.n + ': ' + esc_(x.nota || [x.estilo, (x.formatos || []).join(', ')].filter(Boolean).join(' · ') || 'ajuste')).join('\n') + '\n';
+  if ((p.por_foto || []).length) t += '\n<b>Ajustes por foto</b>\n' + p.por_foto.map(x => '• Foto ' + x.n + ': ' + esc_(x.nota || [x.estilo && ESTILOS_FOTO[x.estilo], (x.formatos || []).join(', '),
+    x.detalle === 'alto' ? 'retoque detallado' : '', describirLimpiezaF_(x.limpieza, '').trim(), describirFondoF_(x.fondo, '').trim()].filter(Boolean).join(' · ') || 'ajuste')).join('\n') + '\n';
   if ((p.no_puede || []).length) t += '\n⚠️ <b>Esto no lo sabemos hacer</b>\n' + p.no_puede.map(x => '• ' + esc_(x)).join('\n') + '\n';
   return t + '\nSi quieres cambiar algo, escríbemelo o mándame una nota de voz.';
 }
@@ -793,7 +922,7 @@ function doGetFotos_(p) {
   }
   if (p.accion === 'compartir_foto') {
     const d = leerDatosF_();
-    const foto = (d.fotos || []).filter(f => f.id === p.foto)[0];
+    const foto = (d.fotos || []).concat(d.fondos || []).filter(f => f.id === p.foto)[0];
     if (!foto) return json_({ ok: false });
     const ok = compartir_(foto.id, true);
     if (ok) { const m2 = misionF_(); m2.compartidas = (m2.compartidas || []).concat([foto.id]); guardarMisionF_(m2); }
@@ -805,7 +934,7 @@ function doGetFotos_(p) {
 function trabajoFotos_(m) {
   const d = leerDatosF_();
   return {
-    codigo: m.codigo, chat_id: m.chat, fotos: d.fotos || [], plan: d.plan || {}, seleccion: d.seleccion || [],
+    codigo: m.codigo, chat_id: m.chat, fotos: d.fotos || [], fondos: d.fondos || [], plan: d.plan || {}, seleccion: d.seleccion || [],
     plan_sesion: d.plan_sesion || null, version: m.versiones || 1,
     conf: { medio: prop_('NOMBRE_MEDIO', 'Torre Informativa'), color: prop_('COLOR_MARCA', '#E30613'), autor: prop_('AUTOR_FOTOS', '') },
   };

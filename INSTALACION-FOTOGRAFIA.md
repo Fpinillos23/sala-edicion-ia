@@ -68,10 +68,20 @@ Comandos: `/sesion`, `/drive`, `/listo`, `/estado`, `/reintentar`, `/cancelar`, 
 ## Lo que sabe hacer cada uno
 
 - **Clay:** nitidez (por zonas, para no castigar el fondo desenfocado de un retrato), exposición, rostros, repetidas y ráfagas (se queda con la mejor de cada grupo y no rellena con repetidas), y con Gemini: composición, momento, expresión, ojos cerrados y relevancia frente a la lista de tomas.
-- **Brock:** revelado natural medido en cada foto (exposición, balance, sombras, luces, contraste, vibrance, nitidez suave) con las reglas de tu skill de retoque; estilos *natural, editorial, cálido, frío, blanco y negro, contraste, vivo, cine, mate*; formatos *original, 4:5, 1:1, 16:9, 9:16, 3:2* con recortes que dejan aire sobre la cabeza; tamaño máximo; logo (`marca/logo.png`); rostros difuminados con mosaico; JPEG de alta calidad en sRGB con autor y derechos.
+- **Brock:** reducción de ruido con PhotoS cuando hace falta; revelado natural medido en cada foto (exposición, balance, sombras, luces, contraste, vibrance, nitidez suave) con las reglas de tu skill de retoque; estilos *natural, editorial, cálido, frío, blanco y negro, contraste, vivo, cine, mate*; formatos *original, 4:5, 1:1, 16:9, 9:16, 3:2* con recortes que dejan aire sobre la cabeza; tamaño máximo; logo (`marca/logo.png`); rostros difuminados con mosaico; JPEG de alta calidad en sRGB con autor y derechos.
 - **Eric:** proporción correcta, luces quemadas o sombras empastadas por el revelado, que la estructura sea la misma foto (nada regenerado), color de piel (magenta ≤ amarillo), recortes que corten rostros, ausencia de GPS; y con Gemini, una revisión visual de antes y después.
 
-**No sabe hacer:** quitar o agregar objetos o personas, cambiar fondos, suavizar piel, adelgazar o cambiar rasgos, generar imágenes, panorámicas ni HDR.
+**Edición detallada** (solo estudio, redes y fotografía artística; nunca en coberturas):
+- **Retoque detallado** («retoque detallado», «de alto nivel»): empareja el tono de la piel en la baja frecuencia sin borrar poros ni pecas, da luz al rostro y vida a los ojos (escleróticas nunca en blanco puro). Es el orden de trabajo de Pratik Naik y Natalia Taffarel.
+- **Limpieza del fondo de estudio**: quita motas y polvo, empareja arrugas y manchas del telón y conserva su grano.
+- **Borrar distracciones** («quita el cable», «borra la silla de la derecha», o «limpia el fondo» en general): Gemini ubica lo que hay que borrar, Brock lo recorta y lo rellena con LaMa. La persona principal queda siempre protegida y nunca se repinta.
+- **Cambiar el fondo**: telón pintado del color que digas, modo retrato (desenfocado), color liso para producto o **una foto tuya**: envíala al bot con el texto `fondo` y luego di en qué fotos va («pon el fondo 1 en la 2 y la 5»). Brock limpia el borde, armoniza la luz y envuelve el contorno para que no parezca recortado.
+- **Estilos de autor**: *fine art* inspirado en Rebeca Saray (variante oscura: clave baja, rostro luminoso, fondo neblinoso, rojos vivos; variante dorada: contraluz cálido con neblina) y *dramático* (referente: Joel Grimes). **El fine art solo se aplica cuando lo pides por su nombre** («estilo Rebeca Saray», «fine art» o «pictórico») y en las fotos que indiques.
+- **Ruido** (PhotoS): se reduce solo cuando la foto tiene grano (noche, interiores). Esto sí se permite en coberturas.
+
+**No sabe hacer:** quitar o agregar a la persona principal, adelgazar o cambiar rasgos, suavizar la piel hasta borrar la textura, generar imágenes o fondos con IA, panorámicas ni HDR, ni recuperar detalle de una foto movida o de una captura de video. Lo que Rebeca Saray hace a mano (repintar el cabello, dodge & burn pincelada por pincelada, componer escenas con utilería) se aproxima, pero no se iguala de forma automática.
+
+**Cobertura periodística:** según las [normas de World Press Photo](https://www.worldpressphoto.org/contest/verification-process/what-counts-as-manipulation), en periodismo no se agrega, quita ni mueve contenido, y no se permiten cambios de tono que alteren la información. Por eso, en una cobertura Trent apaga todo lo anterior y te lo dice en el plan. Brock lo vuelve a bloquear por si acaso. Las fotos con fondo cambiado o elementos borrados llegan marcadas como fotomontaje.
 
 ## Reglas de la casa
 
